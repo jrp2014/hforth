@@ -1,7 +1,7 @@
 import Control.Concurrent ( newMVar ) {- base -}
 import qualified Data.Map as M {- containers -}
 import Data.Ratio ( Ratio ) {- base -}
-import System.IO ( stdin ) {- base -}
+import System.IO ( hSetBuffering, BufferMode( NoBuffering ), stdin, stdout ) {- base -}
 
 import HForth
     ( Forth,
@@ -78,4 +78,5 @@ main = do
       vm = (emptyVm () parseRat sig) {dict = d, inputPort = Just stdin}
       initF = loadFiles ["stdlib.fs","ratlib.fs"]
   putStrLn "RAT-FORTH"
+  hSetBuffering stdout NoBuffering
   repl vm initF

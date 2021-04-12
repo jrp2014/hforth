@@ -37,6 +37,12 @@ class ForthType a where
 tyToInt' :: ForthType a => String -> a -> Int
 tyToInt' msg = fromMaybe (error ("NOT-INTEGER: " ++ msg)) . tyToInt
 
+instance ForthType Int where
+    tyShow = show
+    tyToInt = Just
+    tyFromInt = id
+    tyFromBool t = if t then -1 else 0
+
 instance ForthType Integer where
     tyShow = show
     tyToInt = Just . fromInteger
@@ -756,7 +762,8 @@ repl vm initF = do
 loadFiles :: (Eq a,ForthType a) => [String] -> Forth w a ()
 loadFiles nm = do
   trace 0 ("LOAD-FILES: " ++ intercalate "," nm)
-  r <- liftIO (lookupEnv "HSC3FORTHDIR")
+  --r <- liftIO (lookupEnv "HSC3FORTHDIR")
+  let r = Just "."  -- TODO :: rework this
   case r of
     Nothing -> throwError "HSC3FORTHDIR NOT SET"
     Just dir -> mapM_ (fwIncluded' . (dir </>)) nm
