@@ -1,32 +1,30 @@
 -- | Rational
 module Rational where
 
-import Data.Ratio {- base -}
-import Safe {- safe -}
-import qualified Text.Read as R {- base -}
+import           Data.Ratio  {- base -}
+import           Safe  {- safe -}
+import qualified Text.Read                     as R {- base -}
 
-sep :: Eq a => a -> [a] -> ([a],[a])
-sep c s = let (lhs,rhs) = break (== c) s in (lhs,tailDef [] rhs)
+sep :: Eq a => a -> [a] -> ([a], [a])
+sep c s = let (lhs, rhs) = break (== c) s in (lhs, tailDef [] rhs)
 
 bimap1 :: (t -> t1) -> (t, t) -> (t1, t1)
-bimap1 f (p,q) = (f p,f q)
+bimap1 f (p, q) = (f p, f q)
 
 parseInt :: String -> Maybe Integer
 parseInt = R.readMaybe
 
 parseRat :: String -> Maybe Rational
-parseRat s =
-    case bimap1 parseInt (sep '/' s) of
-      (Just n,Just d) -> Just (n % d)
-      _ ->
-          case parseInt s of
-            Just i -> Just (fromInteger i)
-            Nothing -> fmap realToFrac (R.readMaybe s :: Maybe Double)
+parseRat s = case bimap1 parseInt (sep '/' s) of
+  (Just n, Just d) -> Just (n % d)
+  _                -> case parseInt s of
+    Just i  -> Just (fromInteger i)
+    Nothing -> fmap realToFrac (R.readMaybe s :: Maybe Double)
 
-ratPp :: (Show i,Integral i) => Ratio i -> String
+ratPp :: (Show i, Integral i) => Ratio i -> String
 ratPp r =
-    let n = numerator r
-        d = denominator r
-    in if d == 1 then show n else concat [show n,"/",show d]
+  let n = numerator r
+      d = denominator r
+  in  if d == 1 then show n else concat [show n, "/", show d]
 
 

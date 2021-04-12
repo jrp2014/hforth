@@ -1,28 +1,34 @@
-import Control.Concurrent ( newMVar ) {- base -}
-import qualified Data.Map as M {- containers -}
-import Data.Ratio ( Ratio ) {- base -}
-import System.IO ( hSetBuffering, BufferMode( NoBuffering ), stdin, stdout ) {- base -}
+import           Control.Concurrent             ( newMVar ) {- base -}
+import qualified Data.Map                      as M  {- containers -}
+import           Data.Ratio                     ( Ratio ) {- base -}
+import           System.IO                      ( BufferMode(NoBuffering)
+                                                , hSetBuffering
+                                                , stdin
+                                                , stdout
+                                                ) {- base -}
 
-import HForth
-    ( Forth,
-      VM(dict, inputPort),
-      ForthType(..),
-      Dict,
-      emptyVm,
-      push,
-      pop,
-      coreDict,
-      repl,
-      loadFiles )
-import Rational ( parseRat, ratPp )
+import           HForth                         ( Dict
+                                                , Forth
+                                                , ForthType(..)
+                                                , VM(dict, inputPort)
+                                                , coreDict
+                                                , emptyVm
+                                                , loadFiles
+                                                , pop
+                                                , push
+                                                , repl
+                                                )
+import           Rational                       ( parseRat
+                                                , ratPp
+                                                )
 
 -- * Primitives
 
 instance (Show i,Integral i) => ForthType (Ratio i) where
-    tyShow = ratPp
-    tyToInt = Just . floor
-    tyFromInt = fromIntegral
-    tyFromBool t = if t then -1 else 0
+  tyShow    = ratPp
+  tyToInt   = Just . floor
+  tyFromInt = fromIntegral
+  tyFromBool t = if t then -1 else 0
 
 {-
 -- | Unary stack operation.
@@ -46,37 +52,37 @@ comparisonOp f = binaryOp (\x y -> tyFromBool (f x y))
 
 -- | Forth word @/mod@.
 fwDivMod :: Forth w Rational ()
-fwDivMod =
-    pop >>= \p -> pop >>= \q ->
-    let (r,s) = floor q `divMod` floor p
-    in push (fromInteger s) >> push (fromInteger r)
+fwDivMod = pop >>= \p -> pop >>= \q ->
+  let (r, s) = floor q `divMod` floor p
+  in  push (fromInteger s) >> push (fromInteger r)
 
 ratDict :: Dict w Rational
 ratDict = M.fromList
-    [("+",binaryOp (+))
-    ,("*",binaryOp (*))
-    ,("-",binaryOp (-))
+  [ ("+"      , binaryOp (+))
+  , ("*"      , binaryOp (*))
+  , ("-"      , binaryOp (-))
      -- FRACTIONAL
-    ,("/",binaryOp (/))
+  , ("/"      , binaryOp (/))
      -- INTEGRAL
-    ,("mod",binaryOp' mod)
-    ,("div",binaryOp' div)
-    ,("div-mod",fwDivMod)
+  , ("mod"    , binaryOp' mod)
+  , ("div"    , binaryOp' div)
+  , ("div-mod", fwDivMod)
     -- EQ
-    ,("=",comparisonOp (==))
+  , ("="      , comparisonOp (==))
     -- ORD
-    ,("<",comparisonOp (<))
-    ,("<=",comparisonOp (<=))
-    ,(">",comparisonOp (>))
-    ,(">=",comparisonOp (>=))]
+  , ("<"      , comparisonOp (<))
+  , ("<="     , comparisonOp (<=))
+  , (">"      , comparisonOp (>))
+  , (">="     , comparisonOp (>=))
+  ]
 
 main :: IO ()
 main = do
   sig <- newMVar False
   let d :: Dict () Rational
-      d = M.unions [coreDict,ratDict]
-      vm = (emptyVm () parseRat sig) {dict = d, inputPort = Just stdin}
-      initF = loadFiles ["stdlib.fs","ratlib.fs"]
+      d     = M.unions [coreDict, ratDict]
+      vm    = (emptyVm () parseRat sig) { dict = d, inputPort = Just stdin }
+      initF = loadFiles ["stdlib.fs", "ratlib.fs"]
   putStrLn "RAT-FORTH"
   hSetBuffering stdout NoBuffering
   repl vm initF
