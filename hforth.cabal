@@ -10,14 +10,18 @@ homepage:        https://github.com/jrp2014/hforth
 bug-reports:     https://github.com/jrp2014/hforth/issues
 license:         MIT
 license-file:    LICENSE
-author:          jrp2014
-maintainer:      jrp2014 <jrp2014@users.noreply.github.com>
-copyright:       2021 jrp2014
+author:          (c) Rohan Drape, 2014-2021, jrp2014
+maintainer:
+  rd@rohandrape.net, jrp2014 <jrp2014@users.noreply.github.com>
+
+copyright:       2014-2021 Rohan Drape, 2021 jrp2014
 build-type:      Simple
 extra-doc-files:
   CHANGELOG.md
   README.md
+  README.orig
 
+data-files:      fs/*.fs
 tested-with:     GHC ==8.10.4
 
 source-repository head
@@ -48,14 +52,28 @@ common common-options
 library
   import:          common-options
   hs-source-dirs:  src
-  exposed-modules: HForth
-  build-depends:   mtl
+  exposed-modules:
+    HForth
+    Rational
 
-executable hforth
+  build-depends:
+    , containers
+    , directory
+    , filepath
+    , hashable
+    , mtl
+    , process
+    , safe
+    , unix
+
+executable rat-forth
   import:         common-options
   hs-source-dirs: app
-  main-is:        Main.hs
-  build-depends:  hforth
+  main-is:        rat-forth.hs
+  build-depends:
+    , containers
+    , hforth
+
   ghc-options:    -threaded -rtsopts -with-rtsopts=-N
 
 test-suite hforth-test
