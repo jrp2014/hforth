@@ -14,7 +14,9 @@ bimap1 f (p, q) = (f p, f q)
 parseInt :: String -> Maybe Integer
 parseInt = R.readMaybe
 
+
 parseRat :: String -> Maybe Rational
+parseRat ['\'', ch, '\''] = Just $ fromIntegral $ fromEnum ch
 parseRat s = case bimap1 parseInt (sep '/' s) of
   (Just n, Just d) -> Just (n % d)
   _                -> case parseInt s of

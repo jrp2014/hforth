@@ -313,8 +313,8 @@ scanToken :: Forth w a (Maybe String)
 scanToken = do
   r <- readUntil True isSpace
   case r of
-    ([]  , [] ) -> writeLn " OK" >> return Nothing
-    ([]  , rhs) -> throwError ("SCANTOKEN: NULL: " ++ rhs)
+    (""  , "" ) -> writeLn " OK" >> return Nothing
+    (""  , rhs) -> throwError ("SCANTOKEN: NULL: " ++ rhs)
     ("\\", _  ) -> scanUntil (== '\n') >> scanToken
     ("(" , _  ) -> scanUntil (== ')') >> scanToken
     (e   , _  ) -> return (Just e)
@@ -389,6 +389,7 @@ vmCompile = do
     Word "then" -> fwThen
     Word "{"    -> fwOpenBrace
     Word "s\""  -> fwSQuoteCompiler
+    Word "lit"  -> fwLitCompiler
     e           -> pushc (CCForth (interpretExpr e))
 
 -- | Get instruction at 'CC' or raise an error.
@@ -586,6 +587,15 @@ fwSQuoteInterpet = scanUntil (== '"') >>= pushStr
 fwType :: Forth w a ()
 fwType = popString "TYPE" >>= write
 
+-- * Literals
+fwLitCompiler :: ForthType a => Forth w a ()
+fwLitCompiler = do
+  vm    <- getVm
+  token <- readToken
+  case literal vm token of
+    Just l  -> push l
+    Nothing -> unknownError token
+
 -- * Forth words
 
 -- | Store current buffer & input port, place input string on buffer
@@ -644,6 +654,25 @@ fwPick = do
           e  = s' !! n'
       in  put vm { stack = e : s' }
     _ -> throwError "PICK"
+
+-- Apply comparison with top of stack
+comparison :: ForthType a => (a -> Bool) -> Forth w a ()
+comparison compare = do
+  vm <- getVm
+  case stack vm of
+    DC n : s' ->
+      let flag = tyFromBool $ compare n
+      in  put vm { stack = DC flag : s' }
+    _ -> throwError "comparison"
+--
+-- Apply comparison with top of stack
+binop :: ForthType a => (a -> a -> a) -> Forth w a ()
+binop op = do
+  vm <- getVm
+  case stack vm of
+    DC x : DC y : s' ->
+       put vm { stack = DC (y `op` x) : s' }
+    _ -> throwError "binop"
 
 write, writeLn, writeSp :: String -> Forth w a ()
 write = liftIO . putStr
@@ -760,6 +789,62 @@ coreDict =
       , ("."       , fwDot)
       , (".s"      , fwDotS)
       , ("key", liftIO getChar >>= \c -> push (tyFromInt (fromEnum c)))
+  -- DEBUG
+      , ("vmstat"  , fwVmstat)
+      , ( "trace"
+        , pop
+          >>= \k -> withVm (\vm -> (vm { tracing = tyToInt' "TRACE" k }, ()))
+        )
+      ]
+
+preForthDict :: (Eq a, Num a, Ord a, ForthType a) => Dict w a
+preForthDict =
+  let err nm =
+        throwError (tickQuotes nm ++ ": compiler word in interpeter context")
+  in
+    M.fromList
+      [ ("emit"    , fwEmit) -- ( -- )
+      , ("key", liftIO getChar >>= \c -> push (tyFromInt (fromEnum c))) -- ( -- c )
+      , ("dup"     , fwDup)
+      , ("swap"    , fwSwap)
+      , ("drop"    , fwDrop)
+      , ("0<"      , comparison (0 <))
+      , ("?exit"   , undefined)
+      , (">r"      , pop' >>= pushr')
+      , ("r>"      , popr' >>= push')
+      , ("-"       , binop (-))
+      , ("nest"    , undefined)
+      , ("unnest"  , undefined)
+      , ("lit"     , fwLitCompiler)  -- the point of lit is that it skips compilation
+
+      , ("bye"     , fwBye)
+      , (":"       , fwColon)
+      , (";"       , err ";")
+      , ("s\""     , fwSQuoteInterpet)
+      , ("included", fwIncluded)
+      , ("type"    , fwType)
+      , ("do"      , err "do")
+      , ("i"       , err "i")
+      , ("j"       , err "j")
+      , ("loop"    , err "loop")
+      , ("if"      , err "if")
+      , ("else"    , err "else")
+      , ("then"    , err "then")
+      , ("{"       , err "{")
+      , ("}"       , err "}")
+      , ("'"       , fwQuote)
+      , ("execute" , fwExecute)
+      , ("fork"    , fwFork)
+      , ("kill"    , fwKill)
+      , ("killall" , fwKillAll)
+  -- STACK
+      , ("over"    , fwOver)
+      , ("pick"    , fwPick)
+      , ("rot"     , fwRot)
+      , ("2dup"    , fw2dup)
+   -- IO
+      , ("."       , fwDot)
+      , (".s"      , fwDotS)
   -- DEBUG
       , ("vmstat"  , fwVmstat)
       , ( "trace"

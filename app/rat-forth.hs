@@ -15,6 +15,7 @@ import           HForth                         ( Dict
                                                 , emptyVm
                                                 , loadFiles
                                                 , pop
+                                                , preForthDict
                                                 , push
                                                 , repl
                                                 )
@@ -80,7 +81,8 @@ main :: IO ()
 main = do
   sig <- newMVar False
   let d :: Dict () Rational
-      d     = M.unions [coreDict, ratDict]
+      d     = M.unions [preForthDict, ratDict]
+      --d     = M.unions [coreDict, ratDict]
       vm    = (emptyVm () parseRat sig) { dict = d, inputPort = Just stdin }
       initF = loadFiles ["stdlib.fs", "ratlib.fs"]
   putStrLn "RAT-FORTH"
