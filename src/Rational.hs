@@ -1,8 +1,8 @@
 -- | Rational
 module Rational where
 
-import           Data.Ratio  {- base -}
-import           Safe  {- safe -}
+import Data.Ratio ( Ratio, (%), denominator, numerator )  {- base -}
+import Safe ( tailDef )  {- safe -}
 import qualified Text.Read                     as R {- base -}
 
 sep :: Eq a => a -> [a] -> ([a], [a])
