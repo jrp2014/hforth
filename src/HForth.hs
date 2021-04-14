@@ -891,17 +891,18 @@ catchSigint vm = do
 repl :: (ForthType a, Eq a) => VM w a -> Forth w a () -> IO ()
 repl vm initF = do
   catchSigint vm
-  (_, vm') <- runStateT (CME.runExceptT initF) vm
-  repl' vm'
+  (r, vm') <- runStateT (CME.runExceptT initF) vm
+  case r of
+    Left err -> case err of
+      VMEOF       -> putStrLn "BYE" >> liftIO exitSuccess
+      VMNoInput   -> liftIO exitSuccess
+      VMError msg -> putStrLn (" ERROR: " ++ msg) >> repl' (vmReset vm)
+    Right () -> repl' vm'
 
 loadFiles :: (Eq a, ForthType a) => [String] -> Forth w a ()
 loadFiles nm = do
   trace 0 ("LOAD-FILES: " ++ intercalate "," nm)
-  --r <- liftIO (lookupEnv "HSC3FORTHDIR")
-  let r = Just "."  -- TODO :: rework this
-  case r of
-    Nothing  -> throwError "HSC3FORTHDIR NOT SET"
-    Just dir -> mapM_ (fwIncluded' . (dir </>)) nm
+  mapM_ fwIncluded' nm
 
 -- * List functions
 

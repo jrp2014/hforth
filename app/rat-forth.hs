@@ -10,7 +10,7 @@ import           System.IO                      ( BufferMode(NoBuffering)
 import           HForth                         ( Dict
                                                 , Forth
                                                 , ForthType(..)
-                                                , VM(dict, inputPort)
+                                                , VM(..)
                                                 , coreDict
                                                 , emptyVm
                                                 , loadFiles
@@ -83,8 +83,8 @@ main = do
   let d :: Dict () Rational
       d     = M.unions [preForthDict, ratDict]
       --d     = M.unions [coreDict, ratDict]
-      vm    = (emptyVm () parseRat sig) { dict = d, inputPort = Just stdin }
+      vm    = (emptyVm () parseRat sig) { dict = d, inputPort = Just stdin , tracing = 1}
       initF = loadFiles ["stdlib.fs", "ratlib.fs"]
   putStrLn "RAT-FORTH"
-  hSetBuffering stdout NoBuffering
+--  hSetBuffering stdout NoBuffering
   repl vm initF
