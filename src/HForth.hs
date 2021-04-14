@@ -1,4 +1,5 @@
 {-# language DerivingStrategies #-}
+{-# language StrictData #-}
 module HForth where
 
 import           Control.Concurrent             ( MVar
@@ -64,7 +65,7 @@ instance ForthType Integer where
   tyFromBool t = if t then -1 else 0
 
 -- | A data cell, for the data stacks.
-data DC a = DC a | DCString String | DCXT String
+data DC a = DC !a | DCString String | DCXT String
 
 instance ForthType a => Show (DC a) where
   show dc = case dc of
@@ -651,7 +652,7 @@ fwPick = do
   case stack vm of
     DC n : s' ->
       let n' = tyToInt' "PICK" n
-          e  = s' !! n'
+          e  = s' !! n' -- unsafe
       in  put vm { stack = e : s' }
     _ -> throwError "PICK"
 

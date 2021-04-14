@@ -1,6 +1,7 @@
 import           Control.Concurrent             ( newMVar ) {- base -}
-import qualified Data.Map                      as M  {- containers -}
+import qualified Data.Map                      as M   {- containers -}
 import           Data.Ratio                     ( Ratio ) {- base -}
+import           System.Environment
 import           System.IO                      ( BufferMode(NoBuffering)
                                                 , hSetBuffering
                                                 , stdin
@@ -80,11 +81,16 @@ ratDict = M.fromList
 main :: IO ()
 main = do
   sig <- newMVar False
-  let d :: Dict () Rational
-      d     = M.unions [preForthDict, ratDict]
-      --d     = M.unions [coreDict, ratDict]
-      vm    = (emptyVm () parseRat sig) { dict = d, inputPort = Just stdin , tracing = 1}
-      initF = loadFiles ["stdlib.fs", "ratlib.fs"]
+  args <- getArgs -- TODO :: put in propoer command line argument handling
+  let
+    d :: Dict () Rational
+    d  = M.unions [preForthDict, ratDict]
+    --d     = M.unions [coreDict, ratDict]
+    vm = (emptyVm () parseRat sig) { dict      = d
+                                   , inputPort = Just stdin
+                                   , tracing   = 1
+                                   }
+    initF = loadFiles args -- loadFiles ["stdlib.fs", "ratlib.fs"]
   putStrLn "RAT-FORTH"
 --  hSetBuffering stdout NoBuffering
   repl vm initF
