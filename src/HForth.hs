@@ -28,9 +28,7 @@ import           Data.List                      ( intercalate ) {- base -}
 import qualified Data.Map                      as M  {- containers -}
 import           Data.Maybe                     ( fromMaybe ) {- base -}
 import           System.Directory               ( doesFileExist ) {- directory -}
-import           System.Environment             ( lookupEnv ) {- base -}
-import           System.Exit                    ( exitSuccess ) {- base -}
-import           System.FilePath                ( (</>) ) {- filepath -}
+import           System.Exit                    ( die, exitSuccess ) {- base -}
 import           System.IO                      ( Handle
                                                 , hGetLine
                                                 , hIsEOF
@@ -65,7 +63,7 @@ instance ForthType Integer where
   tyFromBool t = if t then -1 else 0
 
 -- | A data cell, for the data stacks.
-data DC a = DC !a | DCString String | DCXT String
+data DC a = DC a | DCString String | DCXT String
 
 instance ForthType a => Show (DC a) where
   show dc = case dc of
@@ -204,6 +202,10 @@ throwError = CME.throwError . VMError
 unknownError :: String -> Forth w a r
 unknownError s = throwError ("UNKNOWN WORD: " ++ tickQuotes s)
 
+-- | Reader that raises an /unimplemented word/ error.
+notImplementedError :: String -> Forth w a r
+notImplementedError s = throwError ("UNIMPLEMENTED WORD: " ++ tickQuotes s)
+
 -- * Stack
 
 push' :: DC a -> Forth w a ()
@@ -314,7 +316,10 @@ scanToken :: Forth w a (Maybe String)
 scanToken = do
   r <- readUntil True isSpace
   case r of
-    (""  , "" ) -> writeLn " OK" >> return Nothing
+    ("", "") -> do
+      vm <- getVm
+      let sl = length (stack vm)
+      writeLn (" OK " ++ if sl == 0 then "" else show sl) >> return Nothing
     (""  , rhs) -> throwError ("SCANTOKEN: NULL: " ++ rhs)
     ("\\", _  ) -> scanUntil (== '\n') >> scanToken
     ("(" , _  ) -> scanUntil (== ')') >> scanToken
@@ -359,7 +364,7 @@ interpretWord w = do
     Nothing -> case dynamic vm of
       Just f ->
         let dR = f w in put vm { dict = M.insert w dR (dict vm) } >> dR
-      Nothing -> throwError ("UNKNOWN WORD: " ++ tickQuotes w)
+      Nothing -> unknownError w
 
 -- | Either 'interpretWord' or 'push' literal.
 interpretExpr :: Expr a -> Forth w a ()
@@ -379,19 +384,20 @@ vmCompile = do
   expr <- readExpr
   trace 2 ("COMPILE: " ++ exprPp expr)
   case expr of
-    Word ";"    -> fwSemiColon
-    Word ":"    -> throwError ": IN COMPILE CONTEXT"
-    Word "do"   -> pushc (CCWord "do")
-    Word "i"    -> pushc (CCForth fwI)
-    Word "j"    -> pushc (CCForth fwJ)
-    Word "loop" -> fwLoop
-    Word "if"   -> pushc (CCWord "if")
-    Word "else" -> pushc (CCWord "else")
-    Word "then" -> fwThen
-    Word "{"    -> fwOpenBrace
-    Word "s\""  -> fwSQuoteCompiler
-    Word "lit"  -> fwLitCompiler
-    e           -> pushc (CCForth (interpretExpr e))
+    Word ";"     -> fwSemiColon
+    Word ":"     -> throwError ": IN COMPILE CONTEXT"
+    Word "do"    -> pushc (CCWord "do")
+    Word "i"     -> pushc (CCForth fwI)
+    Word "j"     -> pushc (CCForth fwJ)
+    Word "loop"  -> fwLoop
+    Word "if"    -> pushc (CCWord "if")
+    Word "else"  -> pushc (CCWord "else")
+    Word "then"  -> fwThen
+    Word "{"     -> fwOpenBrace
+    Word "s\""   -> fwSQuoteCompiler
+    Word "exit"  -> fwExit
+    Word "?exit" -> fwExitQ
+    e            -> pushc (CCForth (interpretExpr e))
 
 -- | Get instruction at 'CC' or raise an error.
 cwInstr :: CC w a -> Forth w a ()
@@ -436,7 +442,9 @@ vmExecuteBuffer vm = do
   case r of
     Left err -> case err of
       VMNoInput -> return vm'
-      _         -> error ("VMEXECUTEBUFFER: " ++ show err)
+      VMEOF     -> die "VMEXECUTEBUFFER: VMVOF"
+      VMError msg ->
+        die ("VMEXECUTEBUFFER: " ++ msg ++ " before '" ++ head (lines (buffer vm')) ++ "'")
     Right () -> vmExecuteBuffer vm'
 
 -- * DO LOOP
@@ -472,6 +480,18 @@ fwLoop = do
   cw <- unwindCstackTo "do"
   let w = forthBlock (map cwInstr cw)
   pushc (CCForth (interpretDoLoop w))
+
+-- | interpretExit
+interpretExit :: Forth w a ()
+interpretExit = void popr
+
+-- | compile @exit@ statement
+fwExit :: Forth w a ()
+fwExit = pushc (CCForth interpretExit)
+
+-- | compile @exit?@ statement
+fwExitQ :: (Eq a, ForthType a) => Forth w a ()
+fwExitQ = pushc (CCForth (interpretIf (interpretExit, return ())))
 
 -- * IF ELSE THEN
 
@@ -563,7 +583,7 @@ fwSemiColon = do
           w = forthBlock instr'
       in  do
             trace 2 ("END DEFINITION: " ++ nm)
-            when (M.member nm (dict vm)) (writeSp ("REDEFINED " ++ nm))
+            when (M.member nm (dict vm)) (writeLn ("REDEFINED " ++ nm))
             put
               (vm { cstack = []
                   , locals = tail (locals vm)
@@ -587,15 +607,6 @@ fwSQuoteInterpet = scanUntil (== '"') >>= pushStr
 
 fwType :: Forth w a ()
 fwType = popString "TYPE" >>= write
-
--- * Literals
-fwLitCompiler :: ForthType a => Forth w a ()
-fwLitCompiler = do
-  vm    <- getVm
-  token <- readToken
-  case literal vm token of
-    Just l  -> push l
-    Nothing -> unknownError token
 
 -- * Forth words
 
@@ -658,16 +669,16 @@ fwPick = do
 
 -- Apply comparison with top of stack
 comparison :: ForthType a => (a -> Bool) -> Forth w a ()
-comparison compare = do
+comparison cmp = do
   vm <- getVm
   case stack vm of
     DC n : s' ->
-      let flag = tyFromBool $ compare n
+      let flag = tyFromBool $ cmp n
       in  put vm { stack = DC flag : s' }
     _ -> throwError "comparison"
 --
 -- Apply comparison with top of stack
-binop :: ForthType a => (a -> a -> a) -> Forth w a ()
+binop :: (a -> a -> a) -> Forth w a ()
 binop op = do
   vm <- getVm
   case stack vm of
@@ -798,7 +809,7 @@ coreDict =
         )
       ]
 
-preForthDict :: (Eq a, Num a, Ord a, ForthType a) => Dict w a
+preForthDict :: (Num a, Ord a, ForthType a) => Dict w a
 preForthDict =
   let err nm =
         throwError (tickQuotes nm ++ ": compiler word in interpeter context")
@@ -810,13 +821,14 @@ preForthDict =
       , ("swap"    , fwSwap)
       , ("drop"    , fwDrop)
       , ("0<"      , comparison (0 <))
-      , ("?exit"   , undefined)
+      , ("?exit"   , notImplementedError "?exit")
       , (">r"      , pop' >>= pushr')
       , ("r>"      , popr' >>= push')
       , ("-"       , binop (-))
-      , ("nest"    , undefined)
-      , ("unnest"  , undefined)
-      , ("lit"     , fwLitCompiler)  -- the point of lit is that it skips compilation
+      , ("nest"    , notImplementedError "nest")
+      , ("unnest"  , notImplementedError "unnest")
+      , ("exit"    , err "exit")
+      , ("?exit"   , err "?exit")
 
       , ("bye"     , fwBye)
       , (":"       , fwColon)
