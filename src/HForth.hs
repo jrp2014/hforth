@@ -15,7 +15,7 @@ import           Control.Monad                  ( (>=>)
                                                 , void
                                                 , when
                                                 ) {- base -}
-import qualified Control.Monad.Except          as CME  {- mtl -}
+import qualified Control.Monad.Except          as CME   {- mtl -}
 import           Control.Monad.State            ( MonadIO(liftIO)
                                                 , MonadState(get, put)
                                                 , StateT(runStateT)
@@ -26,10 +26,12 @@ import           Data.Char                      ( isSpace
                                                 ) {- base -}
 import           Data.Hashable                  ( Hashable(hash) ) {- hashable -}
 import           Data.List                      ( intercalate ) {- base -}
-import qualified Data.Map                      as M  {- containers -}
+import qualified Data.Map                      as M   {- containers -}
 import           Data.Maybe                     ( fromMaybe ) {- base -}
 import           System.Directory               ( doesFileExist ) {- directory -}
-import           System.Exit                    ( die, exitSuccess ) {- base -}
+import           System.Exit                    ( die
+                                                , exitSuccess
+                                                ) {- base -}
 import           System.IO                      ( Handle
                                                 , hGetLine
                                                 , hIsEOF
@@ -106,6 +108,7 @@ data VM w a = VM
   , inputPort :: Maybe Handle
   , tracing   :: Int
   , sigint    :: MVar Bool -- ^ True if a SIGINT signal (user interrupt) has been received.
+  , exit      :: Bool
   }
 
 instance ForthType a => Show (VM w a) where
@@ -156,6 +159,7 @@ emptyVm w lit sig = VM { stack     = []
                        , inputPort = Nothing
                        , tracing   = -1
                        , sigint    = sig
+                       , exit      = False
                        }
 
 -- | Reset 'VM', on error.
@@ -166,6 +170,7 @@ vmReset vm = vm { stack  = []
                 , buffer = ""
                 , mode   = Interpret
                 , locals = []
+                , exit   = False
                 }
 
 -- | Type specialised variant of 'get' that checks SIGINT handler.
@@ -408,7 +413,11 @@ cwInstr cw = case cw of
 
 -- | Type specialised 'foldl1' of '>>'.
 forthBlock :: [Forth w a ()] -> Forth w a ()
-forthBlock = foldl1 (>>)
+forthBlock (c : cs) = c >> do -- = foldl1 (>>)
+  vm <- getVm
+  unless (exit vm) (forthBlock cs)
+  put $ vm { exit = False }
+forthBlock [] = return ()
 
 -- | Add a 'locals' frame.
 beginLocals :: Forth w a ()
@@ -442,10 +451,15 @@ vmExecuteBuffer vm = do
   (r, vm') <- runStateT (CME.runExceptT vmExecute) vm
   case r of
     Left err -> case err of
-      VMNoInput -> return vm'
-      VMEOF     -> die "VMEXECUTEBUFFER: VMVOF"
-      VMError msg ->
-        die ("VMEXECUTEBUFFER: " ++ msg ++ " before '" ++ head (lines (buffer vm')) ++ "'")
+      VMNoInput   -> return vm'
+      VMEOF       -> die "VMEXECUTEBUFFER: VMVOF"
+      VMError msg -> die
+        (  "VMEXECUTEBUFFER: "
+        ++ msg
+        ++ " before '"
+        ++ head (lines (buffer vm'))
+        ++ "'"
+        )
     Right () -> vmExecuteBuffer vm'
 
 -- * DO LOOP
@@ -484,7 +498,9 @@ fwLoop = do
 
 -- | interpretExit
 interpretExit :: Forth w a ()
-interpretExit = void popr
+interpretExit = do
+  vm <- getVm
+  put $ vm { exit = True }
 
 -- | compile @exit@ statement
 fwExit :: Forth w a ()
@@ -658,9 +674,32 @@ fwRot =
 fw2Dup = pop' >>= \p -> pop' >>= \q -> push' q >> push' p >> push' q >> push' p
 
 fwQDup :: (Eq a, ForthType a) => Forth w a ()
-fwQDup = fwDup >> fwDup >> pop >>= \p -> when ( p == tyFromBool False) fwDrop
+fwQDup = fwDup >> fwDup >> pop >>= \p -> when (p == tyFromBool False) fwDrop
 
+-- | fwGTR (>r)
+fwGTR :: Forth w a ()
+fwGTR = pop' >>= pushr'
 
+-- | fwRGT (r>)
+fwRGT :: Forth w a ()
+fwRGT = popr' >>= push'
+
+-- | 0=
+fw0EQ :: (Eq a, ForthType a) => Forth w a ()
+fw0EQ = predicateOp (== tyFromInt 0)
+
+-- | 0<
+fw0LT :: (Ord a, ForthType a) => Forth w a ()
+fw0LT = predicateOp (< tyFromInt 0)
+
+-- | 1-
+fw1Minus :: (Num a, ForthType a) => Forth w a ()
+fw1Minus = unaryOp (\x -> x - tyFromInt 1)
+
+-- | roll
+fwRoll :: (Eq a, Num a, ForthType a) => Forth w a ()
+fwRoll = fwQDup >> fw0EQ >> interpretIf
+  (return (), fwSwap >> fwGTR >> fw1Minus >> fwRoll >> fwRGT >> fwSwap)
 
 -- | ( xu ... x1 x0 u -- xu ... x1 x0 xu )
 fwPick :: ForthType a => Forth w a ()
@@ -674,23 +713,38 @@ fwPick = do
     _ -> throwError "PICK"
 
 -- Apply comparison with top of stack
+-- (optimized version of comparisonOp)  Not used
 comparison :: ForthType a => (a -> Bool) -> Forth w a ()
 comparison cmp = do
   vm <- getVm
   case stack vm of
     DC n : s' ->
-      let flag = tyFromBool $ cmp n
-      in  put vm { stack = DC flag : s' }
+      let flag = tyFromBool $ cmp n in put vm { stack = DC flag : s' }
     _ -> throwError "comparison"
---
--- Apply comparison with top of stack
-binop :: (a -> a -> a) -> Forth w a ()
-binop op = do
+
+-- | Apply comparison with top of stack
+binOp :: (a -> a -> a) -> Forth w a ()
+binOp op = do
   vm <- getVm
   case stack vm of
-    DC x : DC y : s' ->
-       put vm { stack = DC (y `op` x) : s' }
-    _ -> throwError "binop"
+    DC x : DC y : s' -> put vm { stack = DC (y `op` x) : s' }
+    _                -> throwError "binop"
+
+-- | Binary stack operation.  The first value on the stack is the RHS.
+binaryOp :: (a -> a -> a) -> Forth w a ()
+binaryOp f = pop >>= \y -> pop >>= \x -> push (f x y)
+
+-- | Unary stack operation.
+unaryOp :: (a -> a) -> Forth w a ()
+unaryOp f = pop >>= push . f
+
+-- | comparison operation
+comparisonOp :: ForthType a => (a -> a -> Bool) -> Forth w a ()
+comparisonOp f = binaryOp (\x y -> tyFromBool (f x y))
+
+predicateOp :: ForthType a => (a -> Bool) -> Forth w a ()
+predicateOp f = unaryOp (tyFromBool . f)
+
 
 write, writeLn, writeSp :: String -> Forth w a ()
 write = liftIO . putStr
@@ -766,7 +820,7 @@ fwExecute = do
 
 -- * Dictionaries
 
-coreDict :: (Eq a, Ord a, Num a, ForthType a) => Dict w a
+coreDict :: (Ord a, Num a, ForthType a) => Dict w a
 coreDict =
   let err nm =
         throwError (tickQuotes nm ++ ": compiler word in interpeter context")
@@ -796,18 +850,21 @@ coreDict =
       , ("?exit"   , err "?exit")
 
   -- STACK
-      , ("drop"    , fwDrop)
       , ("dup"     , fwDup)
-      , ("?dup"    , fwQDup)
-      , ("over"    , fwOver)
-      , ("pick"    , fwPick)
-      , ("rot"     , fwRot)
       , ("swap"    , fwSwap)
+      , ("drop"    , fwDrop)
+      , ("over"    , fwOver)
+      , ("rot"     , fwRot)
       , ("2dup"    , fw2Dup)
-      , (">r"      , pop' >>= pushr')
-      , ("r>"      , popr' >>= push')
-      , ("0<"      , comparison (tyFromInt 0 <))
-      , ("-"       , binop (-))
+      , ("?dup"    , fwQDup)
+      , (">r"      , fwGTR)
+      , ("r>"      , fwRGT)
+      , ("0="      , fw0EQ)
+      , ("0<"      , fw0LT)
+      , ("1-"      , fw1Minus)
+      , ("roll"    , fwRoll)
+      , ("pick"    , fwPick)
+      , ("-"       , binaryOp (-))
 
    -- IO
       , ("emit"    , fwEmit)

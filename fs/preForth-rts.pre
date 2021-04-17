@@ -4,8 +4,8 @@
 \ define lots of useful standard words
 \ ------------------------------------
 
-: ?dup ( x -- x x | 0 )
-    dup dup ?exit drop ;
+\ : ?dup ( x -- x x | 0 )
+\     dup dup ?exit drop ;
     
 : 0= ( x -- flag )
    0 swap ?exit drop -1 ;
@@ -50,8 +50,9 @@
 \ : pick ( xn-1 ... x0 i -- xn-1 ... x0 xi )
 \    over swap ?dup 0= ?exit nip swap >r 1- pick r> swap ;  
 
-: roll ( xn-1 ... x0 i -- xn-1 ... xi-1 xi+1 ... x0 xi )
-    ?dup 0= ?exit swap >r 1- roll r> swap ;
+\ roll is recursive and so can't be implemented
+\ : roll ( xn-1 ... x0 i -- xn-1 ... xi-1 xi+1 ... x0 xi )
+\    ?dup 0= ?exit swap >r 1- roll r> swap ;
 
 
 \ case? compares the value x to y. If they match, return true. If not keep x and return false.
