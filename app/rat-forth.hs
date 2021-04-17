@@ -16,7 +16,6 @@ import           HForth                         ( Dict
                                                 , emptyVm
                                                 , loadFiles
                                                 , pop
-                                                , preForthDict
                                                 , push
                                                 , repl
                                                 )
@@ -84,7 +83,7 @@ main = do
   args <- getArgs -- TODO :: put in propoer command line argument handling
   let
     d :: Dict () Rational
-    d  = M.unions [preForthDict, ratDict]
+    d  = M.unions [coreDict, ratDict]
     --d     = M.unions [coreDict, ratDict]
     vm = (emptyVm () parseRat sig) { dict      = d
                                    , inputPort = Just stdin

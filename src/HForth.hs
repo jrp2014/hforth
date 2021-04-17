@@ -1,5 +1,6 @@
 {-# language DerivingStrategies #-}
 {-# language StrictData #-}
+{-# language FlexibleContexts #-}
 module HForth where
 
 import           Control.Concurrent             ( MVar
@@ -396,7 +397,7 @@ vmCompile = do
     Word "{"     -> fwOpenBrace
     Word "s\""   -> fwSQuoteCompiler
     Word "exit"  -> fwExit
-    Word "?exit" -> fwExitQ
+    Word "?exit" -> fwQExit
     e            -> pushc (CCForth (interpretExpr e))
 
 -- | Get instruction at 'CC' or raise an error.
@@ -489,9 +490,9 @@ interpretExit = void popr
 fwExit :: Forth w a ()
 fwExit = pushc (CCForth interpretExit)
 
--- | compile @exit?@ statement
-fwExitQ :: (Eq a, ForthType a) => Forth w a ()
-fwExitQ = pushc (CCForth (interpretIf (interpretExit, return ())))
+-- | compile @?exit@ statement
+fwQExit :: (Eq a, ForthType a) => Forth w a ()
+fwQExit = pushc (CCForth (interpretIf (interpretExit, return ())))
 
 -- * IF ELSE THEN
 
@@ -647,14 +648,19 @@ fwJ = do
 
 -- | dup : ( p -- p p ) swap : ( p q -- q p ) drop : ( p -- ) over : (
 -- p q -- p q p ) rot : ( p q r -- q r p ) 2dup : ( p q -- p q p q )
-fwDup, fwSwap, fwDrop, fwOver, fwRot, fw2dup :: Forth w a ()
+fwDup, fwSwap, fwDrop, fwOver, fwRot, fw2Dup :: Forth w a ()
 fwDup = pop' >>= \e -> push' e >> push' e
 fwSwap = pop' >>= \p -> pop' >>= \q -> push' p >> push' q
 fwDrop = void pop'
 fwOver = pop' >>= \p -> pop' >>= \q -> push' q >> push' p >> push' q
 fwRot =
   pop' >>= \p -> pop' >>= \q -> pop' >>= \r -> push' q >> push' p >> push' r
-fw2dup = pop' >>= \p -> pop' >>= \q -> push' q >> push' p >> push' q >> push' p
+fw2Dup = pop' >>= \p -> pop' >>= \q -> push' q >> push' p >> push' q >> push' p
+
+fwQDup :: (Eq a, ForthType a) => Forth w a ()
+fwQDup = fwDup >> fwDup >> pop >>= \p -> when ( p == tyFromBool False) fwDrop
+
+
 
 -- | ( xu ... x1 x0 u -- xu ... x1 x0 xu )
 fwPick :: ForthType a => Forth w a ()
@@ -760,7 +766,7 @@ fwExecute = do
 
 -- * Dictionaries
 
-coreDict :: (Eq a, ForthType a) => Dict w a
+coreDict :: (Eq a, Ord a, Num a, ForthType a) => Dict w a
 coreDict =
   let err nm =
         throwError (tickQuotes nm ++ ": compiler word in interpeter context")
@@ -786,78 +792,29 @@ coreDict =
       , ("kill"    , fwKill)
       , ("killall" , fwKillAll)
       , ("bye"     , fwBye)
+      , ("exit"    , err "exit")
+      , ("?exit"   , err "?exit")
+
   -- STACK
       , ("drop"    , fwDrop)
       , ("dup"     , fwDup)
+      , ("?dup"    , fwQDup)
       , ("over"    , fwOver)
       , ("pick"    , fwPick)
       , ("rot"     , fwRot)
       , ("swap"    , fwSwap)
-      , ("2dup"    , fw2dup)
+      , ("2dup"    , fw2Dup)
       , (">r"      , pop' >>= pushr')
       , ("r>"      , popr' >>= push')
+      , ("0<"      , comparison (tyFromInt 0 <))
+      , ("-"       , binop (-))
+
    -- IO
       , ("emit"    , fwEmit)
       , ("."       , fwDot)
       , (".s"      , fwDotS)
       , ("key", liftIO getChar >>= \c -> push (tyFromInt (fromEnum c)))
-  -- DEBUG
-      , ("vmstat"  , fwVmstat)
-      , ( "trace"
-        , pop
-          >>= \k -> withVm (\vm -> (vm { tracing = tyToInt' "TRACE" k }, ()))
-        )
-      ]
 
-preForthDict :: (Num a, Ord a, ForthType a) => Dict w a
-preForthDict =
-  let err nm =
-        throwError (tickQuotes nm ++ ": compiler word in interpeter context")
-  in
-    M.fromList
-      [ ("emit"    , fwEmit) -- ( -- )
-      , ("key", liftIO getChar >>= \c -> push (tyFromInt (fromEnum c))) -- ( -- c )
-      , ("dup"     , fwDup)
-      , ("swap"    , fwSwap)
-      , ("drop"    , fwDrop)
-      , ("0<"      , comparison (0 <))
-      , ("?exit"   , notImplementedError "?exit")
-      , (">r"      , pop' >>= pushr')
-      , ("r>"      , popr' >>= push')
-      , ("-"       , binop (-))
-      , ("nest"    , notImplementedError "nest")
-      , ("unnest"  , notImplementedError "unnest")
-      , ("exit"    , err "exit")
-      , ("?exit"   , err "?exit")
-
-      , ("bye"     , fwBye)
-      , (":"       , fwColon)
-      , (";"       , err ";")
-      , ("s\""     , fwSQuoteInterpet)
-      , ("included", fwIncluded)
-      , ("type"    , fwType)
-      , ("do"      , err "do")
-      , ("i"       , err "i")
-      , ("j"       , err "j")
-      , ("loop"    , err "loop")
-      , ("if"      , err "if")
-      , ("else"    , err "else")
-      , ("then"    , err "then")
-      , ("{"       , err "{")
-      , ("}"       , err "}")
-      , ("'"       , fwQuote)
-      , ("execute" , fwExecute)
-      , ("fork"    , fwFork)
-      , ("kill"    , fwKill)
-      , ("killall" , fwKillAll)
-  -- STACK
-      , ("over"    , fwOver)
-      , ("pick"    , fwPick)
-      , ("rot"     , fwRot)
-      , ("2dup"    , fw2dup)
-   -- IO
-      , ("."       , fwDot)
-      , (".s"      , fwDotS)
   -- DEBUG
       , ("vmstat"  , fwVmstat)
       , ( "trace"
