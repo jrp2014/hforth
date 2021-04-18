@@ -15,19 +15,19 @@ import           Control.Monad                  ( (>=>)
                                                 , void
                                                 , when
                                                 ) {- base -}
-import qualified Control.Monad.Except          as CME   {- mtl -}
+import qualified Control.Monad.Except          as CME    {- mtl -}
 import           Control.Monad.State            ( MonadIO(liftIO)
                                                 , MonadState(get, put)
                                                 , StateT(runStateT)
                                                 , modify
                                                 ) {- mtl -}
 import           Data.Char                      ( isSpace
-                                                , toLower
                                                 , ord
+                                                , toLower
                                                 ) {- base -}
 import           Data.Hashable                  ( Hashable(hash) ) {- hashable -}
 import           Data.List                      ( intercalate ) {- base -}
-import qualified Data.Map                      as M   {- containers -}
+import qualified Data.Map                      as M    {- containers -}
 import           Data.Maybe                     ( fromMaybe ) {- base -}
 import           System.Directory               ( doesFileExist ) {- directory -}
 import           System.Exit                    ( die
@@ -776,15 +776,25 @@ fwGT = comparisonOp (>)
 
 -- (/mod
 fwOPSlashMod :: (Ord a, Num a, ForthType a) => Forth w a ()
-fwOPSlashMod = fwGTR >> fwOver >> fwOver >> fwLT >> fwRGT >> fwSwap >> interpretIf
-  (return (), fwGTR >> fwSwap >> fwOver >> fwMinus >> fwSwap >> fwRGT >> fw1Plus >> fwOPSlashMod)
+fwOPSlashMod =
+  fwGTR >> fwOver >> fwOver >> fwLT >> fwRGT >> fwSwap >> interpretIf
+    ( return ()
+    , fwGTR
+    >> fwSwap
+    >> fwOver
+    >> fwMinus
+    >> fwSwap
+    >> fwRGT
+    >> fw1Plus
+    >> fwOPSlashMod
+    )
 
 -- | 10*
-fw10Times  :: (Num a, ForthType a) => Forth w a ()
+fw10Times :: (Num a, ForthType a) => Forth w a ()
 fw10Times = unaryOp (* tyFromInt 10)
 
 -- |  (10u/mod
-fwOP10uSlashMod  :: (Ord a, Num a, ForthType a) => Forth w a ()
+fwOP10uSlashMod :: (Ord a, Num a, ForthType a) => Forth w a ()
 fwOP10uSlashMod = push 2 >> fwPick >> fwOver >> fwGT >> fw0EQ >> interpretIf
   ( return ()
   , fwDup
@@ -803,13 +813,14 @@ fwOP10uSlashMod = push 2 >> fwPick >> fwOver >> fwGT >> fw0EQ >> interpretIf
   )
 
 -- |  10u/mod
-fw10uSlashMod  :: (Ord a, Num a, ForthType a) => Forth w a ()
+fw10uSlashMod :: (Ord a, Num a, ForthType a) => Forth w a ()
 fw10uSlashMod = push 0 >> push 1 >> fwOP10uSlashMod >> fwDrop
 
 fwOPuDot :: (Ord a, Num a, ForthType a) => Forth w a ()
 fwOPuDot = fwQDup >> fw0EQ >> interpretIf
-  (return (), fw10uSlashMod >> fwOPuDot >> push (tyFromInt $ ord '0') >> fwPlus >> fwEmit)
-
+  ( return ()
+  , fw10uSlashMod >> fwOPuDot >> push (tyFromInt $ ord '0') >> fwPlus >> fwEmit
+  )
 
 write, writeLn, writeSp :: String -> Forth w a ()
 write = liftIO . putStr
