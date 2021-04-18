@@ -23,6 +23,7 @@ import           Control.Monad.State            ( MonadIO(liftIO)
                                                 ) {- mtl -}
 import           Data.Char                      ( isSpace
                                                 , toLower
+                                                , ord
                                                 ) {- base -}
 import           Data.Hashable                  ( Hashable(hash) ) {- hashable -}
 import           Data.List                      ( intercalate ) {- base -}
@@ -108,7 +109,7 @@ data VM w a = VM
   , inputPort :: Maybe Handle
   , tracing   :: Int
   , sigint    :: MVar Bool -- ^ True if a SIGINT signal (user interrupt) has been received.
-  , exit      :: Bool
+  , exit      :: Bool -- ^ temporary flag (doesn't worth in the presence of recursion)
   }
 
 instance ForthType a => Show (VM w a) where
@@ -412,11 +413,11 @@ cwInstr cw = case cw of
   CCForth f -> f
 
 -- | Type specialised 'foldl1' of '>>'.
+-- This will spin foreve in the face of recursion
 forthBlock :: [Forth w a ()] -> Forth w a ()
-forthBlock (c : cs) = c >> do -- = foldl1 (>>)
+forthBlock (c : cs) = c >> do
   vm <- getVm
-  unless (exit vm) (forthBlock cs)
-  put $ vm { exit = False }
+  if exit vm then put $ vm { exit = False } else forthBlock cs
 forthBlock [] = return ()
 
 -- | Add a 'locals' frame.
@@ -662,56 +663,6 @@ fwJ = do
   pushr x
   push z
 
--- | dup : ( p -- p p ) swap : ( p q -- q p ) drop : ( p -- ) over : (
--- p q -- p q p ) rot : ( p q r -- q r p ) 2dup : ( p q -- p q p q )
-fwDup, fwSwap, fwDrop, fwOver, fwRot, fw2Dup :: Forth w a ()
-fwDup = pop' >>= \e -> push' e >> push' e
-fwSwap = pop' >>= \p -> pop' >>= \q -> push' p >> push' q
-fwDrop = void pop'
-fwOver = pop' >>= \p -> pop' >>= \q -> push' q >> push' p >> push' q
-fwRot =
-  pop' >>= \p -> pop' >>= \q -> pop' >>= \r -> push' q >> push' p >> push' r
-fw2Dup = pop' >>= \p -> pop' >>= \q -> push' q >> push' p >> push' q >> push' p
-
-fwQDup :: (Eq a, ForthType a) => Forth w a ()
-fwQDup = fwDup >> fwDup >> pop >>= \p -> when (p == tyFromBool False) fwDrop
-
--- | fwGTR (>r)
-fwGTR :: Forth w a ()
-fwGTR = pop' >>= pushr'
-
--- | fwRGT (r>)
-fwRGT :: Forth w a ()
-fwRGT = popr' >>= push'
-
--- | 0=
-fw0EQ :: (Eq a, ForthType a) => Forth w a ()
-fw0EQ = predicateOp (== tyFromInt 0)
-
--- | 0<
-fw0LT :: (Ord a, ForthType a) => Forth w a ()
-fw0LT = predicateOp (< tyFromInt 0)
-
--- | 1-
-fw1Minus :: (Num a, ForthType a) => Forth w a ()
-fw1Minus = unaryOp (\x -> x - tyFromInt 1)
-
--- | roll
-fwRoll :: (Eq a, Num a, ForthType a) => Forth w a ()
-fwRoll = fwQDup >> fw0EQ >> interpretIf
-  (return (), fwSwap >> fwGTR >> fw1Minus >> fwRoll >> fwRGT >> fwSwap)
-
--- | ( xu ... x1 x0 u -- xu ... x1 x0 xu )
-fwPick :: ForthType a => Forth w a ()
-fwPick = do
-  vm <- getVm
-  case stack vm of
-    DC n : s' ->
-      let n' = tyToInt' "PICK" n
-          e  = s' !! n' -- unsafe
-      in  put vm { stack = e : s' }
-    _ -> throwError "PICK"
-
 -- Apply comparison with top of stack
 -- (optimized version of comparisonOp)  Not used
 comparison :: ForthType a => (a -> Bool) -> Forth w a ()
@@ -744,6 +695,120 @@ comparisonOp f = binaryOp (\x y -> tyFromBool (f x y))
 
 predicateOp :: ForthType a => (a -> Bool) -> Forth w a ()
 predicateOp f = unaryOp (tyFromBool . f)
+
+-- | dup : ( p -- p p ) swap : ( p q -- q p ) drop : ( p -- ) over : (
+-- p q -- p q p ) rot : ( p q r -- q r p ) 2dup : ( p q -- p q p q )
+fwDup, fwSwap, fwDrop, fwOver, fwRot, fw2Dup :: Forth w a ()
+fwDup = pop' >>= \e -> push' e >> push' e
+fwSwap = pop' >>= \p -> pop' >>= \q -> push' p >> push' q
+fwDrop = void pop'
+fwOver = pop' >>= \p -> pop' >>= \q -> push' q >> push' p >> push' q
+fwRot =
+  pop' >>= \p -> pop' >>= \q -> pop' >>= \r -> push' q >> push' p >> push' r
+fw2Dup = pop' >>= \p -> pop' >>= \q -> push' q >> push' p >> push' q >> push' p
+
+fwQDup :: (Eq a, ForthType a) => Forth w a ()
+fwQDup = fwDup >> fwDup >> pop >>= \p -> when (p == tyFromBool False) fwDrop
+
+-- | fwGTR (>r)
+fwGTR :: Forth w a ()
+fwGTR = pop' >>= pushr'
+
+-- | fwRGT (r>)
+fwRGT :: Forth w a ()
+fwRGT = popr' >>= push'
+
+-- | 0=
+fw0EQ :: (Eq a, ForthType a) => Forth w a ()
+fw0EQ = predicateOp (== tyFromInt 0)
+
+-- | 0<
+fw0LT :: (Ord a, ForthType a) => Forth w a ()
+fw0LT = predicateOp (< tyFromInt 0)
+
+-- | 1+
+fw1Plus :: (Num a, ForthType a) => Forth w a ()
+fw1Plus = unaryOp (\x -> x + tyFromInt 1)
+
+-- | 1-
+fw1Minus :: (Num a, ForthType a) => Forth w a ()
+fw1Minus = unaryOp (\x -> x - tyFromInt 1)
+
+-- | roll
+fwRoll :: (Eq a, Num a, ForthType a) => Forth w a ()
+fwRoll = fwQDup >> fw0EQ >> interpretIf
+  (return (), fwSwap >> fwGTR >> fw1Minus >> fwRoll >> fwRGT >> fwSwap)
+--fwRoll = forthBlock [fwQDup , fw0EQ , fwQExit, fwSwap , fwGTR , fw1Minus , fwRoll , fwRGT , fwSwap]
+
+-- | ( xu ... x1 x0 u -- xu ... x1 x0 xu )
+fwPick :: ForthType a => Forth w a ()
+fwPick = do
+  vm <- getVm
+  case stack vm of
+    DC n : s' ->
+      let n' = tyToInt' "PICK" n
+          e  = s' !! n' -- unsafe
+      in  put vm { stack = e : s' }
+    _ -> throwError "PICK"
+
+-- | nip
+fwNip :: Forth w a ()
+fwNip = fwSwap >> fwDrop
+
+-- | +
+fwPlus :: (Num a) => Forth w a ()
+fwPlus = binaryOp (+)
+-- | -
+fwMinus :: (Num a) => Forth w a ()
+fwMinus = binaryOp (-)
+
+-- | <
+fwEQ :: (Ord a, ForthType a) => Forth w a ()
+fwEQ = comparisonOp (==)
+
+-- | <
+fwLT :: (Ord a, ForthType a) => Forth w a ()
+fwLT = comparisonOp (<)
+
+-- | <
+fwGT :: (Ord a, ForthType a) => Forth w a ()
+fwGT = comparisonOp (>)
+
+-- (/mod
+fwOPSlashMod :: (Ord a, Num a, ForthType a) => Forth w a ()
+fwOPSlashMod = fwGTR >> fwOver >> fwOver >> fwLT >> fwRGT >> fwSwap >> interpretIf
+  (return (), fwGTR >> fwSwap >> fwOver >> fwMinus >> fwSwap >> fwRGT >> fw1Plus >> fwOPSlashMod)
+
+-- | 10*
+fw10Times  :: (Num a, ForthType a) => Forth w a ()
+fw10Times = unaryOp (* tyFromInt 10)
+
+-- |  (10u/mod
+fwOP10uSlashMod  :: (Ord a, Num a, ForthType a) => Forth w a ()
+fwOP10uSlashMod = push 2 >> fwPick >> fwOver >> fwGT >> fw0EQ >> interpretIf
+  ( return ()
+  , fwDup
+  >> fwGTR
+  >> fw10Times
+  >> fwOP10uSlashMod
+  >> fwSwap
+  >> fwGTR
+  >> push 0
+  >> fwOPSlashMod
+  >> fwNip
+  >> fwRGT
+  >> fw10Times
+  >> fwPlus
+  >> fwRGT
+  )
+
+-- |  10u/mod
+fw10uSlashMod  :: (Ord a, Num a, ForthType a) => Forth w a ()
+fw10uSlashMod = push 0 >> push 1 >> fwOP10uSlashMod >> fwDrop
+
+fwOPuDot :: (Ord a, Num a, ForthType a) => Forth w a ()
+fwOPuDot = fwQDup >> fw0EQ >> interpretIf
+  (return (), fw10uSlashMod >> fwOPuDot >> push (tyFromInt $ ord '0') >> fwPlus >> fwEmit)
 
 
 write, writeLn, writeSp :: String -> Forth w a ()
@@ -848,7 +913,6 @@ coreDict =
       , ("bye"     , fwBye)
       , ("exit"    , err "exit")
       , ("?exit"   , err "?exit")
-
   -- STACK
       , ("dup"     , fwDup)
       , ("swap"    , fwSwap)
@@ -861,17 +925,26 @@ coreDict =
       , ("r>"      , fwRGT)
       , ("0="      , fw0EQ)
       , ("0<"      , fw0LT)
+      , ("1+"      , fw1Plus)
       , ("1-"      , fw1Minus)
       , ("roll"    , fwRoll)
       , ("pick"    , fwPick)
-      , ("-"       , binaryOp (-))
-
+      , ("nip"     , fwNip)
+      , ("+"       , fwPlus)
+      , ("-"       , fwMinus)
+      , ("="       , fwEQ)
+      , ("<"       , fwLT)
+      , (">"       , fwGT)
+      , ("(/mod"   , fwOPSlashMod)
+      , ("10*"     , fw10Times)
+      , ("(10u/mod", fwOP10uSlashMod)
+      , ("10u/mod" , fw10uSlashMod)
+      , ("(u."     , fwOPuDot)
    -- IO
       , ("emit"    , fwEmit)
       , ("."       , fwDot)
       , (".s"      , fwDotS)
       , ("key", liftIO getChar >>= \c -> push (tyFromInt (fromEnum c)))
-
   -- DEBUG
       , ("vmstat"  , fwVmstat)
       , ( "trace"
