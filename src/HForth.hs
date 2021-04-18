@@ -511,6 +511,10 @@ fwExit = pushc (CCForth interpretExit)
 fwQExit :: (Eq a, ForthType a) => Forth w a ()
 fwQExit = pushc (CCForth (interpretIf (interpretExit, return ())))
 
+fwQExit' :: (Eq a, ForthType a) => Forth w a () -> Forth w a ()
+fwQExit' f = interpretIf (return (), f)
+
+
 -- * IF ELSE THEN
 
 -- | Consult stack and select either /true/ or /false/.
@@ -776,28 +780,25 @@ fwGT = comparisonOp (>)
 
 -- (/mod
 fwOPSlashMod :: (Ord a, Num a, ForthType a) => Forth w a ()
-fwOPSlashMod =
-  fwGTR >> fwOver >> fwOver >> fwLT >> fwRGT >> fwSwap >> interpretIf
-    ( return ()
-    , fwGTR
-    >> fwSwap
-    >> fwOver
-    >> fwMinus
-    >> fwSwap
-    >> fwRGT
-    >> fw1Plus
-    >> fwOPSlashMod
-    )
+fwOPSlashMod = fwGTR >> fwOver >> fwOver >> fwLT >> fwRGT >> fwSwap >> fwQExit'
+  (  fwGTR
+  >> fwSwap
+  >> fwOver
+  >> fwMinus
+  >> fwSwap
+  >> fwRGT
+  >> fw1Plus
+  >> fwOPSlashMod
+  )
 
 -- | 10*
 fw10Times :: (Num a, ForthType a) => Forth w a ()
 fw10Times = unaryOp (* tyFromInt 10)
 
--- |  (10u/mod
+-- | (10u/mod
 fwOP10uSlashMod :: (Ord a, Num a, ForthType a) => Forth w a ()
-fwOP10uSlashMod = push 2 >> fwPick >> fwOver >> fwGT >> fw0EQ >> interpretIf
-  ( return ()
-  , fwDup
+fwOP10uSlashMod = push 2 >> fwPick >> fwOver >> fwGT >> fw0EQ >> fwQExit'
+  (  fwDup
   >> fwGTR
   >> fw10Times
   >> fwOP10uSlashMod
@@ -812,15 +813,14 @@ fwOP10uSlashMod = push 2 >> fwPick >> fwOver >> fwGT >> fw0EQ >> interpretIf
   >> fwRGT
   )
 
--- |  10u/mod
+-- | 10u/mod
 fw10uSlashMod :: (Ord a, Num a, ForthType a) => Forth w a ()
 fw10uSlashMod = push 0 >> push 1 >> fwOP10uSlashMod >> fwDrop
 
+-- | (u.
 fwOPuDot :: (Ord a, Num a, ForthType a) => Forth w a ()
-fwOPuDot = fwQDup >> fw0EQ >> interpretIf
-  ( return ()
-  , fw10uSlashMod >> fwOPuDot >> push (tyFromInt $ ord '0') >> fwPlus >> fwEmit
-  )
+fwOPuDot = fwQDup >> fw0EQ >> fwQExit'
+  (fw10uSlashMod >> fwOPuDot >> push (tyFromInt $ ord '0') >> fwPlus >> fwEmit)
 
 write, writeLn, writeSp :: String -> Forth w a ()
 write = liftIO . putStr
