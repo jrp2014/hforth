@@ -473,9 +473,7 @@ vmExecute = do
 
 vmExecuteBuffer :: (ForthType a, Eq a) => VM w a -> IO (VM w a)
 vmExecuteBuffer vm = do
-  putStr "VMEXECUTEBUFFER "
   (r, vm') <- runStateT (CME.runExceptT vmExecute) vm
-  print r
   case r of
     Left err -> case err of
       VMNoInput   -> return vm'
