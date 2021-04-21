@@ -37,22 +37,22 @@ unaryOp :: (a -> a) -> Forth w a ()
 unaryOp f = pop >>= push . f
 -}
 
-binaryOp'' :: (i -> a) -> (a -> i) -> (a -> a -> a) -> Forth w i ()
+binaryOp'' :: (i -> a) -> (a -> i) -> (a -> a -> a) -> Forth w i (Either () ())
 binaryOp'' f g h = pop >>= \y -> pop >>= \x -> push (g (h (f x) (f y)))
 
-binaryOp' :: (Integer -> Integer -> Integer) -> Forth w Rational ()
+binaryOp' :: (Integer -> Integer -> Integer) -> Forth w Rational (Either () ())
 binaryOp' = binaryOp'' floor fromInteger
 
 -- | Binary stack operation.  The first value on the stack is the RHS.
-binaryOp :: (a -> a -> a) -> Forth w a ()
+binaryOp :: (a -> a -> a) -> Forth w a (Either () ())
 binaryOp f = pop >>= \y -> pop >>= \x -> push (f x y)
 
 -- | 'binaryOp', /rep/ translates the result so it can be placed onto the stack.
-comparisonOp :: ForthType a => (a -> a -> Bool) -> Forth w a ()
+comparisonOp :: ForthType a => (a -> a -> Bool) -> Forth w a (Either () ())
 comparisonOp f = binaryOp (\x y -> tyFromBool (f x y))
 
 -- | Forth word @/mod@.
-fwDivMod :: Forth w Rational ()
+fwDivMod :: Forth w Rational (Either () ())
 fwDivMod = pop >>= \p -> pop >>= \q ->
   let (r, s) = floor q `divMod` floor p
   in  push (fromInteger s) >> push (fromInteger r)
