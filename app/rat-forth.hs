@@ -1,5 +1,5 @@
 import           Control.Concurrent             ( newMVar ) {- base -}
-import qualified Data.Map                      as M   {- containers -}
+import qualified Data.Map                      as M       {- containers -}
 import           Data.Ratio                     ( Ratio ) {- base -}
 import           System.Environment
 import           System.IO                      ( BufferMode(NoBuffering)
@@ -10,14 +10,17 @@ import           System.IO                      ( BufferMode(NoBuffering)
 
 import           HForth                         ( Dict
                                                 , Forth
+                                                , ForthStep
                                                 , ForthType(..)
                                                 , VM(..)
                                                 , coreDict
                                                 , emptyVm
+                                                , fwExit
                                                 , loadFiles
                                                 , pop
                                                 , push
                                                 , repl
+                                                , writeLn
                                                 )
 import           Rational                       ( parseRat
                                                 , ratPp
@@ -57,6 +60,14 @@ fwDivMod = pop >>= \p -> pop >>= \q ->
   let (r, s) = floor q `divMod` floor p
   in  push (fromInteger s) >> push (fromInteger r)
 
+
+fwUndefined :: Maybe (String -> ForthStep w a)
+fwUndefined = Just u
+ where
+  u s = do
+    writeLn $ s ++ " is undfined"
+    fwExit
+
 ratDict :: Dict w Rational
 ratDict = M.fromList
   [ ("+"      , binaryOp (+))
@@ -79,17 +90,17 @@ ratDict = M.fromList
 
 main :: IO ()
 main = do
-  sig <- newMVar False
+  sig  <- newMVar False
   args <- getArgs -- TODO :: put in propoer command line argument handling
-  let
-    d :: Dict () Rational
-    d  = coreDict
-    --d     = M.unions [coreDict, ratDict]
-    vm = (emptyVm () parseRat sig) { dict      = d
-                                   , inputPort = Just stdin
-                                   , tracing   = 1
-                                   }
-    initF = loadFiles args -- loadFiles ["stdlib.fs", "ratlib.fs"]
+  let d :: Dict () Rational
+      d  = coreDict
+      --d     = M.unions [coreDict, ratDict]
+      vm = (emptyVm () parseRat sig) { dict      = d
+                                     , inputPort = Just stdin
+                                     , tracing   = 1
+                                     , recursive = fwUndefined
+                                     }
+      initF = loadFiles args -- loadFiles ["stdlib.fs", "ratlib.fs"]
   putStrLn "RAT-FORTH"
 --  hSetBuffering stdout NoBuffering
   repl vm initF

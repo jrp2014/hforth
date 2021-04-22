@@ -106,7 +106,7 @@ data VM w a = VM
   , mode      :: VMMode -- ^ Basic state of the machine.
   , world     :: w -- ^ The world, instance state.
   , literal   :: String -> Maybe a -- ^ Read function for literal values.
-  , dynamic   :: Maybe (String -> ForthStep w a) -- ^ Dynamic post-dictionary lookup.
+  , recursive :: Maybe (String -> ForthStep w a) -- ^ Allow recursive definitions
   , inputPort :: Maybe Handle
   , tracing   :: Int
   , sigint    :: MVar Bool -- ^ True if a SIGINT signal (user interrupt) has been received.
@@ -131,8 +131,8 @@ instance ForthType a => Show (VM w a) where
     , buffer vm
     , "\n MODE: "
     , show (mode vm)
-    , "\n DYMAMIC: "
-    , maybe "NO" (const "YES") (dynamic vm)
+    , "\n RECURSIVE: "
+    , maybe "NO" (const "YES") (recursive vm)
     , "\n INPUT PORT: "
     , maybe "NO" (const "YES") (inputPort vm)
     , "\n TRACING: "
@@ -166,7 +166,7 @@ emptyVm w lit sig = VM { stack     = []
                        , locals    = []
                        , world     = w
                        , literal   = lit
-                       , dynamic   = Nothing
+                       , recursive = Nothing
                        , inputPort = Nothing
                        , tracing   = -1
                        , sigint    = sig
@@ -315,8 +315,8 @@ parseToken s = do
     Just _  -> return (Word s)
     Nothing -> case literal vm s of
       Just l  -> return (Literal l)
-      Nothing -> case dynamic vm of
-        Just _  -> return (Word s) -- if there is a dynamic reader, defer...
+      Nothing -> case recursive vm of
+        Just _  -> return (Word s) -- if there is a recursive placeholder, defer...
         Nothing -> unknownError s
 
 -- | Read buffer until predicate holds, if /pre/ delete preceding white space.
@@ -378,18 +378,22 @@ readExpr = parseToken =<< readToken
 
 -- * Interpret
 
--- | 'lookupWord' in the dictionary, if unknown try 'dynamic', if
--- dynamic gives a word then add it to the dictionary.
+-- | 'lookupWord' in the dictionary
 interpretWord :: String -> ForthStep w a
 interpretWord w = do
   vm <- getVm
   trace 3 ("INTERPRETWORD: " ++ w)
   case lookupWord w vm of
     Just r  -> r
-    Nothing -> case dynamic vm of
+    Nothing -> unknownError w
+
+{-
+    case recursive vm of
       Just f ->
         let dR = f w in put vm { dict = M.insert w dR (dict vm) } >> dR
       Nothing -> unknownError w
+-}
+
 
 -- | Either 'interpretWord' or 'push' literal.
 interpretExpr :: Expr a -> ForthStep w a
