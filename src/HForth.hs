@@ -144,15 +144,16 @@ data VMSignal = VMEOF | VMNoInput | VMError String deriving stock (Eq,Show)
 -- | An instruction, the implementation of a /word/.
 type Forth w a r = CME.ExceptT VMSignal (StateT (VM w a) IO) r
 
+data Continue = Next | Exit deriving stock Show
 
 -- | The result of intpreting an instruction: Left = exit, Right () = continue
-type ForthStep w a = Forth w a (Either () ())
+type ForthStep w a = Forth w a Continue
 
 next :: ForthStep w a
-next = return $ Right ()
+next = return Next
 
 exit :: ForthStep w a
-exit = return $ Left ()
+exit = return Exit
 
 
 
@@ -439,18 +440,18 @@ cwInstr cw = case cw of
 forthBlock :: [ForthStep w a] -> ForthStep w a
 forthBlock []       = next
 forthBlock (i : is) = i >>= \case
-  Left  () -> next
-  Right () -> forthBlock is
+  Exit -> next
+  Next -> forthBlock is
 
 --forthBlock = foldl1 (>>)
 
 -- | Add a 'locals' frame.
 beginLocals :: ForthStep w a
-beginLocals = withVm (\vm -> (vm { locals = M.empty : locals vm }, Right ()))
+beginLocals = withVm (\vm -> (vm { locals = M.empty : locals vm }, Next))
 
 -- | Remove a 'locals' frame.
 endLocals :: ForthStep w a
-endLocals = withVm (\vm -> (vm { locals = tail (locals vm) }, Right ()))
+endLocals = withVm (\vm -> (vm { locals = tail (locals vm) }, Next))
 
 -- | Unwind the 'cstack' to the indicated control word.  The result is
 -- the code block, in sequence.  The control word is also removed from
@@ -485,8 +486,8 @@ vmExecuteBuffer vm = do
         ++ head (lines (buffer vm'))
         ++ "'"
         )
-    Right (Right ()) -> vmExecuteBuffer vm'
-    Right (Left  ()) -> vmExecuteBuffer vm' -- TODO don't stop buffer execution?
+    Right Next -> vmExecuteBuffer vm'
+    Right Exit -> vmExecuteBuffer vm' -- TODO don't stop buffer execution?
 
 -- * DO LOOP
 
@@ -508,8 +509,8 @@ interpretDoLoop code = do
   let step = do
         shortCircuit <- code
         case shortCircuit of
-          Left  () -> exit
-          Right () -> do
+          Exit -> exit
+          Next -> do
             i <- popr
             let i' = tyFromInt (tyToInt' "DO-LOOP: I" i + 1)
             pushr i'
@@ -901,7 +902,7 @@ pushStr :: ForthType a => String -> ForthStep w a
 pushStr str =
   let f vm =
         ( vm { stack = DC (tyFromInt (length str)) : DCString str : stack vm }
-        , Right ()
+        , Next
         )
   in  withVm f
 
@@ -1019,7 +1020,7 @@ coreDict =
       , ("vmstat"  , fwVmStat)
       , ( "trace"
         , pop >>= \k ->
-          withVm (\vm -> (vm { tracing = tyToInt' "TRACE" k }, Right ()))
+          withVm (\vm -> (vm { tracing = tyToInt' "TRACE" k }, Next))
         )
       ]
 
@@ -1036,8 +1037,8 @@ execErr vm fw = do
   (r, vm') <- runStateT (CME.runExceptT fw) vm
   case r of
     Left  err        -> error ("EXECERR: " ++ show err)
-    Right (Right ()) -> return vm'
-    Right (Left  ()) -> return vm'
+    Right Next -> return vm'
+    Right Exit -> return vm'
 
 -- | Read, evaluate, print, loop.  Prints @OK@ at end of line.  Prints
 -- error message and runs 'vmReset' on error.
@@ -1049,8 +1050,8 @@ repl' vm = do
       VMEOF       -> putStrLn "BYE" >> liftIO exitSuccess
       VMNoInput   -> liftIO exitSuccess
       VMError msg -> putStrLn (" ERROR: " ++ msg) >> repl' (vmReset vm)
-    Right (Right ()) -> repl' vm'
-    Right (Left  ()) -> repl' vm'
+    Right Next -> repl' vm'
+    Right Exit -> repl' vm'
 
 catchSigint :: VM w a -> IO ()
 catchSigint vm = do
@@ -1069,8 +1070,8 @@ repl vm initF = do
       VMEOF       -> putStrLn "BYE" >> liftIO exitSuccess
       VMNoInput   -> liftIO exitSuccess
       VMError msg -> putStrLn (" ERROR: " ++ msg) >> repl' (vmReset vm)
-    Right (Right ()) -> repl' vm'
-    Right (Left  ()) -> repl' vm'
+    Right Next -> repl' vm'
+    Right Exit -> repl' vm'
 
 loadFiles :: (Eq a, ForthType a) => [String] -> ForthStep w a
 loadFiles nm = do

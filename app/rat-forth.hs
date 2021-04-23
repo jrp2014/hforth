@@ -1,5 +1,5 @@
 import           Control.Concurrent             ( newMVar ) {- base -}
-import qualified Data.Map                      as M       {- containers -}
+import qualified Data.Map                      as M        {- containers -}
 import           Data.Ratio                     ( Ratio ) {- base -}
 import           System.Environment
 import           System.IO                      ( BufferMode(NoBuffering)
@@ -8,7 +8,8 @@ import           System.IO                      ( BufferMode(NoBuffering)
                                                 , stdout
                                                 ) {- base -}
 
-import           HForth                         ( Dict
+import           HForth                         ( Continue
+                                                , Dict
                                                 , Forth
                                                 , ForthStep
                                                 , ForthType(..)
@@ -40,22 +41,22 @@ unaryOp :: (a -> a) -> Forth w a ()
 unaryOp f = pop >>= push . f
 -}
 
-binaryOp'' :: (i -> a) -> (a -> i) -> (a -> a -> a) -> Forth w i (Either () ())
+binaryOp'' :: (i -> a) -> (a -> i) -> (a -> a -> a) -> Forth w i Continue
 binaryOp'' f g h = pop >>= \y -> pop >>= \x -> push (g (h (f x) (f y)))
 
-binaryOp' :: (Integer -> Integer -> Integer) -> Forth w Rational (Either () ())
+binaryOp' :: (Integer -> Integer -> Integer) -> Forth w Rational Continue
 binaryOp' = binaryOp'' floor fromInteger
 
 -- | Binary stack operation.  The first value on the stack is the RHS.
-binaryOp :: (a -> a -> a) -> Forth w a (Either () ())
+binaryOp :: (a -> a -> a) -> Forth w a Continue
 binaryOp f = pop >>= \y -> pop >>= \x -> push (f x y)
 
 -- | 'binaryOp', /rep/ translates the result so it can be placed onto the stack.
-comparisonOp :: ForthType a => (a -> a -> Bool) -> Forth w a (Either () ())
+comparisonOp :: ForthType a => (a -> a -> Bool) -> Forth w a Continue
 comparisonOp f = binaryOp (\x y -> tyFromBool (f x y))
 
 -- | Forth word @/mod@.
-fwDivMod :: Forth w Rational (Either () ())
+fwDivMod :: Forth w Rational Continue
 fwDivMod = pop >>= \p -> pop >>= \q ->
   let (r, s) = floor q `divMod` floor p
   in  push (fromInteger s) >> push (fromInteger r)
