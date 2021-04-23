@@ -110,7 +110,6 @@ data VM w a = VM
   , inputPort :: Maybe Handle
   , tracing   :: Int
   , sigint    :: MVar Bool -- ^ True if a SIGINT signal (user interrupt) has been received.
-  , exit      :: Bool -- ^ temporary flag (doesn't worth in the presence of recursion)
   }
 
 instance ForthType a => Show (VM w a) where
@@ -146,11 +145,14 @@ data VMSignal = VMEOF | VMNoInput | VMError String deriving stock (Eq,Show)
 type Forth w a r = CME.ExceptT VMSignal (StateT (VM w a) IO) r
 
 
--- | The result of intpreting an instruction: Nothing = exit, Just () = continue
+-- | The result of intpreting an instruction: Left = exit, Right () = continue
 type ForthStep w a = Forth w a (Either () ())
 
 next :: ForthStep w a
 next = return $ Right ()
+
+exit :: ForthStep w a
+exit = return $ Left ()
 
 
 
@@ -170,7 +172,6 @@ emptyVm w lit sig = VM { stack     = []
                        , inputPort = Nothing
                        , tracing   = -1
                        , sigint    = sig
-                       , exit      = False
                        }
 
 -- | Reset 'VM', on error.
@@ -181,7 +182,6 @@ vmReset vm = vm { stack  = []
                 , buffer = ""
                 , mode   = Interpret
                 , locals = []
-                , exit   = False
                 }
 
 -- | Type specialised variant of 'get' that checks SIGINT handler.
@@ -436,15 +436,11 @@ cwInstr cw = case cw of
   CCForth f -> f
 
 -- | Type specialised 'foldl1' of '>>'.
--- This will spin foreve in the face of recursion
 forthBlock :: [ForthStep w a] -> ForthStep w a
-forthBlock [] = return $ Right ()
-forthBlock (i : is) =
-  i
-    >>= (\case
-          Left  () -> return $ Right ()
-          Right () -> forthBlock is
-        )
+forthBlock []       = next
+forthBlock (i : is) = i >>= \case
+  Left  () -> next
+  Right () -> forthBlock is
 
 --forthBlock = foldl1 (>>)
 
@@ -512,7 +508,7 @@ interpretDoLoop code = do
   let step = do
         shortCircuit <- code
         case shortCircuit of
-          Left  () -> return $ Left ()
+          Left  () -> exit
           Right () -> do
             i <- popr
             let i' = tyFromInt (tyToInt' "DO-LOOP: I" i + 1)
@@ -531,17 +527,11 @@ fwLoop = do
 
 -- | @exit@ statement
 fwExit :: ForthStep w a
-fwExit = do
-  trace 3 "FWEXIT"
-  return $ Left () -- short circuit
+fwExit = exit -- short circuit
 
 -- | @?exit@ statement
 fwQExit :: (Eq a, ForthType a) => ForthStep w a
 fwQExit = interpretIf (fwExit, next)
-
---fwQExit' :: (Eq a, ForthType a) => ForthStep w a -> ForthStep w a
---fwQExit' f = interpretIf (next, f)
-
 
 -- * IF ELSE THEN
 
@@ -647,7 +637,7 @@ fwSemiColon = do
                   }
               )
             next
-    _ -> throwError "CSTACK"
+    _ -> throwError "CSTACK UNDERFLOW"
 
 -- * STRINGS
 
