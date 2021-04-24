@@ -1,8 +1,12 @@
 -- | Rational
 module Rational where
 
-import Data.Ratio ( Ratio, (%), denominator, numerator )  {- base -}
-import Safe ( tailDef )  {- safe -}
+import           Data.Ratio                     ( (%)
+                                                , Ratio
+                                                , denominator
+                                                , numerator
+                                                )  {- base -}
+import           Safe                           ( tailDef )  {- safe -}
 import qualified Text.Read                     as R {- base -}
 
 sep :: Eq a => a -> [a] -> ([a], [a])
@@ -16,11 +20,11 @@ parseInt = R.readMaybe
 
 
 parseRat :: String -> Maybe Rational
-parseRat ['\'', ch, '\''] = Just $ fromIntegral $ fromEnum ch
-parseRat s = case bimap1 parseInt (sep '/' s) of
+parseRat ['\'', ch, '\''] = Just $ fromIntegral $ fromEnum ch -- allow 'x' to represent an Int
+parseRat s                = case bimap1 parseInt (sep '/' s) of
   (Just n, Just d) -> Just (n % d)
   _                -> case parseInt s of
-    Just i  -> Just (fromInteger i)
+    Just i  -> Just (fromIntegral i)
     Nothing -> fmap realToFrac (R.readMaybe s :: Maybe Double)
 
 ratPp :: (Show i, Integral i) => Ratio i -> String
