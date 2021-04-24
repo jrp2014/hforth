@@ -317,7 +317,10 @@ parseToken s = do
     Nothing -> case literal vm s of
       Just l  -> return (Literal l)
       Nothing -> case recursive vm of
-        Just _  -> return (Word s) -- if there is a recursive placeholder, defer...
+        Just _ -> do
+          case reverse $ cstack vm of
+            (CCWord cw : _) | cw == s -> return (Word s) -- if there is a recursive placeholder, defer...
+            _ -> unknownError s
         Nothing -> unknownError s
 
 -- | Read buffer until predicate holds, if /pre/ delete preceding white space.
@@ -427,7 +430,6 @@ vmCompile = do
     Word "s\""   -> fwSQuoteCompiler
     Word "exit"  -> pushc (CCForth fwExit)
     Word "?exit" -> pushc (CCForth fwQExit)
-    Word "?dup"  -> pushc (CCForth fwQDup)
     e            -> pushc (CCForth (interpretExpr e))
 
 -- | Get instruction at 'CC' or raise an error.
@@ -730,20 +732,13 @@ predicateOp f = unaryOp (tyFromBool . f)
 
 -- | dup : ( p -- p p ) swap : ( p q -- q p ) drop : ( p -- ) over : (
 -- p q -- p q p ) rot : ( p q r -- q r p ) 2dup : ( p q -- p q p q )
-fwDup, fwSwap, fwDrop, fwOver, fwRot, fw2Dup :: ForthStep w a
+fwDup, fwSwap, fwDrop :: ForthStep w a
 fwDup = pop' >>= \e -> push' e >> push' e
 fwSwap = pop' >>= \p -> pop' >>= \q -> push' p >> push' q
 fwDrop = do
   trace 3 "FWDROP"
   _dropped <- pop'
   next
-fwOver = pop' >>= \p -> pop' >>= \q -> push' q >> push' p >> push' q
-fwRot =
-  pop' >>= \p -> pop' >>= \q -> pop' >>= \r -> push' q >> push' p >> push' r
-fw2Dup = pop' >>= \p -> pop' >>= \q -> push' q >> push' p >> push' q >> push' p
-
-fwQDup :: (Eq a, ForthType a) => ForthStep w a
-fwQDup = forthBlock [fwDup, fwDup, fwQExit, fwDrop]
 
 -- | fwGTR (>r)
 fwGTR :: ForthStep w a
@@ -753,127 +748,13 @@ fwGTR = pop' >>= pushr'
 fwRGT :: ForthStep w a
 fwRGT = popr' >>= push'
 
--- | 0=
-fw0EQ :: (Eq a, ForthType a) => ForthStep w a
-fw0EQ = predicateOp (== tyFromInt 0)
-
 -- | 0<
 fw0LT :: (Ord a, ForthType a) => ForthStep w a
 fw0LT = predicateOp (< tyFromInt 0)
 
--- | 1+
-fw1Plus :: (Num a, ForthType a) => ForthStep w a
-fw1Plus = unaryOp (\x -> x + tyFromInt 1)
-
--- | 1-
-fw1Minus :: (Num a, ForthType a) => ForthStep w a
-fw1Minus = unaryOp (\x -> x - tyFromInt 1)
-
--- | roll
-fwRoll :: (Eq a, Num a, ForthType a) => ForthStep w a
---fwRoll = fwQDup >> fw0EQ >> interpretIf
---  (next, fwSwap >> fwGTR >> fw1Minus >> fwRoll >> fwRGT >> fwSwap)
-fwRoll = forthBlock
-  [fwQDup, fw0EQ, fwQExit, fwSwap, fwGTR, fw1Minus, fwRoll, fwRGT, fwSwap]
-
--- | ( xu ... x1 x0 u -- xu ... x1 x0 xu )
-fwPick :: ForthType a => ForthStep w a
-fwPick = do
-  vm <- getVm
-  case stack vm of
-    DC n : s' ->
-      let n' = tyToInt' "PICK" n
-          e  = s' !! n' -- unsafe
-      in  put vm { stack = e : s' } >> next
-    _ -> throwError "PICK"
-
--- | nip
-fwNip :: ForthStep w a
-fwNip = fwSwap >> fwDrop
-
--- | +
-fwPlus :: (Num a) => ForthStep w a
-fwPlus = binaryOp (+)
 -- | -
 fwMinus :: (Num a) => ForthStep w a
 fwMinus = binaryOp (-)
-
--- | <
-fwEQ :: (Ord a, ForthType a) => ForthStep w a
-fwEQ = comparisonOp (==)
-
--- | <
-fwLT :: (Ord a, ForthType a) => ForthStep w a
-fwLT = comparisonOp (<)
-
--- | <
-fwGT :: (Ord a, ForthType a) => ForthStep w a
-fwGT = comparisonOp (>)
-
--- (/mod
-fwOPSlashMod :: (Ord a, Num a, ForthType a) => ForthStep w a
-fwOPSlashMod = forthBlock
-  [ fwGTR
-  , fwOver
-  , fwOver
-  , fwLT
-  , fwRGT
-  , fwSwap
-  , fwQExit
-  , fwGTR
-  , fwSwap
-  , fwOver
-  , fwMinus
-  , fwSwap
-  , fwRGT
-  , fw1Plus
-  , fwOPSlashMod
-  ]
-
--- | 10*
-fw10Times :: (Num a, ForthType a) => ForthStep w a
-fw10Times = unaryOp (* tyFromInt 10)
-
--- | (10u/mod
-fwOP10uSlashMod :: (Ord a, Num a, ForthType a) => ForthStep w a
-fwOP10uSlashMod = forthBlock
-  [ push 2
-  , fwPick
-  , fwOver
-  , fwGT
-  , fw0EQ
-  , fwQExit
-  , fwDup
-  , fwGTR
-  , fw10Times
-  , fwOP10uSlashMod
-  , fwSwap
-  , fwGTR
-  , push 0
-  , fwOPSlashMod
-  , fwNip
-  , fwRGT
-  , fw10Times
-  , fwPlus
-  , fwRGT
-  ]
-
--- | 10u/mod
-fw10uSlashMod :: (Ord a, Num a, ForthType a) => ForthStep w a
-fw10uSlashMod = forthBlock [push 0, push 1, fwOP10uSlashMod, fwDrop]
-
--- | (u.
-fwOPuDot :: (Ord a, Num a, ForthType a) => ForthStep w a
-fwOPuDot = forthBlock
-  [ fwQDup
-  , fw0EQ
-  , fwQExit
-  , fw10uSlashMod
-  , fwOPuDot
-  , push (tyFromInt $ ord '0')
-  , fwPlus
-  , fwEmit
-  ]
 
 write, writeLn, writeSp :: String -> ForthStep w a
 write s = do
@@ -984,33 +865,14 @@ coreDict =
       , ("bye"     , fwBye)
       , ("exit"    , err "exit")
       , ("?exit"   , err "?exit")
+      , (">r"      , fwGTR)
+      , ("r>"      , fwRGT)
+      , ("0<"      , fw0LT)
+      , ("-"       , fwMinus)
   -- STACK
       , ("dup"     , fwDup)
       , ("swap"    , fwSwap)
       , ("drop"    , fwDrop)
-      , ("over"    , fwOver)
-      , ("rot"     , fwRot)
-      , ("2dup"    , fw2Dup)
-      , ("?dup"    , err "?dup")
-      , (">r"      , fwGTR)
-      , ("r>"      , fwRGT)
-      , ("0="      , fw0EQ)
-      , ("0<"      , fw0LT)
-      , ("1+"      , fw1Plus)
-      , ("1-"      , fw1Minus)
-      , ("roll"    , fwRoll)
-      , ("pick"    , fwPick)
-      , ("nip"     , fwNip)
-      , ("+"       , fwPlus)
-      , ("-"       , fwMinus)
-      , ("="       , fwEQ)
-      , ("<"       , fwLT)
-      , (">"       , fwGT)
-      , ("(/mod"   , fwOPSlashMod)
-      , ("10*"     , fw10Times)
-      , ("(10u/mod", fwOP10uSlashMod)
-      , ("10u/mod" , fw10uSlashMod)
-      , ("(u."     , fwOPuDot)
    -- IO
       , ("emit"    , fwEmit)
       , ("."       , fwDot)
