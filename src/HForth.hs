@@ -23,7 +23,6 @@ import           Control.Monad.State            ( MonadIO(liftIO)
                                                 , modify
                                                 )
 import           Data.Char                      ( isSpace
-                                                , ord
                                                 , toLower
                                                 )
 import           Data.Hashable                  ( Hashable(hash) )
@@ -103,12 +102,12 @@ data VM w a = VM
   , dict      :: Dict w a -- ^ The dictionary.
   , locals    :: [Dict w a] -- ^ The stack of locals dictionaries.
   , buffer    :: String -- ^ The current line of input text.
-  , mode      :: VMMode -- ^ Basic state of the machine.
+  , mode      :: VMMode -- ^ Basic state of the machine - compiling or interpreting.
   , world     :: w -- ^ The world, instance state.
   , literal   :: String -> Maybe a -- ^ Read function for literal values.
-  , recursive :: Maybe (String -> ForthStep w a) -- ^ Allow recursive definitions
-  , inputPort :: Maybe Handle
-  , tracing   :: Int
+  , recursive :: Maybe (String -> ForthStep w a) -- ^ Allow recursive word definitions
+  , inputPort :: Maybe Handle -- ^ eg, @Just stdin@
+  , tracing   :: Int -- ^ for debugging
   , sigint    :: MVar Bool -- ^ True if a SIGINT signal (user interrupt) has been received.
   }
 
@@ -320,7 +319,7 @@ parseToken s = do
         Just _ -> do
           case reverse $ cstack vm of
             (CCWord cw : _) | cw == s -> return (Word s) -- if there is a recursive placeholder, defer...
-            _ -> unknownError s
+            _                         -> unknownError s
         Nothing -> unknownError s
 
 -- | Read buffer until predicate holds, if /pre/ delete preceding white space.
@@ -527,6 +526,11 @@ fwLoop = do
   cw <- unwindCstackTo "do"
   let w = forthBlock (map cwInstr cw)
   pushc (CCForth (interpretDoLoop w))
+
+-- | placeholder for deferred definitions
+fwUndefined :: Maybe (String -> ForthStep w a)
+fwUndefined = Just u
+  where u s = forthBlock [writeLn $ s ++ " is undfined", fwExit]
 
 -- | @exit@ statement
 fwExit :: ForthStep w a
@@ -898,7 +902,7 @@ execErr :: VM w a -> ForthStep w a -> IO (VM w a)
 execErr vm fw = do
   (r, vm') <- runStateT (CME.runExceptT fw) vm
   case r of
-    Left  err        -> error ("EXECERR: " ++ show err)
+    Left  err  -> error ("EXECERR: " ++ show err)
     Right Next -> return vm'
     Right Exit -> return vm'
 

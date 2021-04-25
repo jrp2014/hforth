@@ -1,27 +1,24 @@
 import           Control.Concurrent             ( newMVar ) {- base -}
-import qualified Data.Map                      as M        {- containers -}
+import qualified Data.Map                      as M          {- containers -}
 import           Data.Ratio                     ( Ratio ) {- base -}
-import           System.Environment
-import           System.IO                      ( BufferMode(NoBuffering)
-                                                , hSetBuffering
-                                                , stdin
-                                                , stdout
+import System.Environment ( getArgs )
+import           System.IO                      ( stdin
+                                                
                                                 ) {- base -}
 
 import           HForth                         ( Continue
                                                 , Dict
                                                 , Forth
-                                                , ForthStep
                                                 , ForthType(..)
                                                 , VM(..)
                                                 , coreDict
                                                 , emptyVm
-                                                , fwExit
+                                                , fwUndefined
                                                 , loadFiles
                                                 , pop
                                                 , push
                                                 , repl
-                                                , writeLn
+                                                
                                                 )
 import           Rational                       ( parseRat
                                                 , ratPp
@@ -62,13 +59,6 @@ fwDivMod = pop >>= \p -> pop >>= \q ->
   in  push (fromInteger s) >> push (fromInteger r)
 
 
-fwUndefined :: Maybe (String -> ForthStep w a)
-fwUndefined = Just u
- where
-  u s = do
-    writeLn $ s ++ " is undfined"
-    fwExit
-
 ratDict :: Dict w Rational
 ratDict = M.fromList
   [ ("+"      , binaryOp (+))
@@ -92,7 +82,7 @@ ratDict = M.fromList
 main :: IO ()
 main = do
   sig  <- newMVar False
-  args <- getArgs -- TODO :: put in propoer command line argument handling
+  args <- getArgs
   let d :: Dict () Rational
       d  = coreDict
       --d     = M.unions [coreDict, ratDict]

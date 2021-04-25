@@ -1,5 +1,5 @@
 -- | Rational
-module Rational where
+module Rational (parseInt, parseRat, ratPp) where
 
 import           Data.Ratio                     ( (%)
                                                 , Ratio
