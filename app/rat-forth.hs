@@ -63,7 +63,7 @@ ratDict :: Dict w Rational
 ratDict = M.fromList
   [ ("+"      , binaryOp (+))
   , ("*"      , binaryOp (*))
-  , ("-"      , binaryOp (-))
+--  , ("-"      , binaryOp (-)) -- already included in coreDict
      -- FRACTIONAL
   , ("/"      , binaryOp (/))
      -- INTEGRAL
@@ -84,8 +84,8 @@ main = do
   sig  <- newMVar False
   args <- getArgs
   let d :: Dict () Rational
-      d  = coreDict
-      --d     = M.unions [coreDict, ratDict]
+--      d  = coreDict
+      d     = M.unions [coreDict, ratDict]
       vm = (emptyVm () parseRat sig) { dict      = d
                                      , inputPort = Just stdin
                                      , tracing   = 1

@@ -5,8 +5,10 @@
 : 1- 1 - ;
 : 0= 0 = ;
 
-: true 1 ; \ In ANS Forth true is -1.  In SC3 true is 1.
+: true -1 ; \ In ANS Forth true is -1.
 : false 0 ;
+
+: not 0= ;
 
 : bl 32 ;
 : space bl emit ;

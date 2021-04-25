@@ -10,6 +10,7 @@ import           Control.Concurrent             ( MVar
                                                 , killThread
                                                 , modifyMVar
                                                 , modifyMVar_
+                                                , threadDelay
                                                 )
 import           Control.Monad                  ( (>=>)
                                                 , unless
@@ -345,7 +346,8 @@ scanToken = do
     ("", "") -> do
       vm <- getVm
       let sl = length (stack vm)
-      writeLn (" OK " ++ if sl == 0 then "" else show sl) >> return Nothing
+      writeLn (" OK " ++ if sl == 0 then "" else '<' : show sl ++ ">")
+        >> return Nothing
     (""  , rhs) -> throwError ("SCANTOKEN: NULL: " ++ rhs)
     ("\\", _  ) -> scanUntil (== '\n') >> scanToken
     ("(" , _  ) -> scanUntil (== ')') >> scanToken
@@ -736,13 +738,30 @@ predicateOp f = unaryOp (tyFromBool . f)
 
 -- | dup : ( p -- p p ) swap : ( p q -- q p ) drop : ( p -- ) over : (
 -- p q -- p q p ) rot : ( p q r -- q r p ) 2dup : ( p q -- p q p q )
-fwDup, fwSwap, fwDrop :: ForthStep w a
+fwDup, fwSwap, fwDrop, fwOver, fwRot, fw2dup :: ForthStep w a
 fwDup = pop' >>= \e -> push' e >> push' e
 fwSwap = pop' >>= \p -> pop' >>= \q -> push' p >> push' q
 fwDrop = do
   trace 3 "FWDROP"
   _dropped <- pop'
   next
+fwOver = pop' >>= \p -> pop' >>= \q -> push' q >> push' p >> push' q
+fwRot =
+  pop' >>= \p -> pop' >>= \q -> pop' >>= \r -> push' q >> push' p >> push' r
+fw2dup = pop' >>= \p -> pop' >>= \q -> push' q >> push' p >> push' q >> push' p
+
+-- | ( xu ... x1 x0 u -- xu ... x1 x0 xu )
+fwPick :: ForthType a => ForthStep w a
+fwPick = do
+  vm <- getVm
+  case stack vm of
+    DC n : s' ->
+      let n' = tyToInt' "PICK" n
+          e  = s' !! n'
+      in  do
+            put vm { stack = e : s' }
+            next
+    _ -> throwError "PICK"
 
 -- | fwGTR (>r)
 fwGTR :: ForthStep w a
@@ -839,6 +858,12 @@ fwExecute = do
     DCXT xt -> interpretWord xt >> next
     _       -> throwError "EXECUTE: NOT EXECUTION TOKEN"
 
+-- | Pause the current thread (seconds)
+fwPause :: (ForthType a) => ForthStep w a
+fwPause = popInt "PAUSE" >>= pauseThread >> next
+  where
+    pauseThread n = when (n > 0) (liftIO (threadDelay (n * 1000000)))
+
 -- * Dictionaries
 
 coreDict :: (Ord a, Num a, ForthType a) => Dict w a
@@ -866,24 +891,41 @@ coreDict =
       , ("fork"    , fwFork)
       , ("kill"    , fwKill)
       , ("killall" , fwKillAll)
-      , ("bye"     , fwBye)
-      , ("exit"    , err "exit")
-      , ("?exit"   , err "?exit")
-      , (">r"      , fwGTR)
-      , ("r>"      , fwRGT)
-      , ("0<"      , fw0LT)
-      , ("-"       , fwMinus)
+      , ( "recursive"
+        , pop >>= \r -> withVm
+          (\vm ->
+            ( vm
+              { recursive = if r /= tyFromBool False
+                              then fwUndefined
+                              else Nothing
+              }
+            , Next
+            )
+          )
+        )
+      , ("bye"   , fwBye)
+      , ("exit"  , err "exit")
+      , ("?exit" , err "?exit")
+      , ("0<"    , fw0LT)
+      , ("-"     , fwMinus)
+      , ("pause" , fwPause)
   -- STACK
-      , ("dup"     , fwDup)
-      , ("swap"    , fwSwap)
-      , ("drop"    , fwDrop)
+      , ("drop"  , fwDrop)
+      , ("dup"   , fwDup)
+      , ("over"  , fwOver)
+      , ("pick"  , fwPick)
+      , ("rot"   , fwRot)
+      , ("swap"  , fwSwap)
+      , ("2dup"  , fw2dup)
+      , (">r"    , fwGTR)
+      , ("r>"    , fwRGT)
    -- IO
-      , ("emit"    , fwEmit)
-      , ("."       , fwDot)
-      , (".s"      , fwDotS)
+      , ("emit"  , fwEmit)
+      , ("."     , fwDot)
+      , (".s"    , fwDotS)
       , ("key", liftIO getChar >>= \c -> push (tyFromInt (fromEnum c)))
   -- DEBUG
-      , ("vmstat"  , fwVmStat)
+      , ("vmstat", fwVmStat)
       , ( "trace"
         , pop >>= \k ->
           withVm (\vm -> (vm { tracing = tyToInt' "TRACE" k }, Next))
