@@ -1,16 +1,51 @@
 # hforth
 
+## Overview
+
 A Forth-like interpreter framework in Haskell
 based on `hsc3-forth` from: http://rohandrape.net/t/hsc3-forth
 
-Two examples are provided:
-* `h-forth` TODO
-* `rat-forth` uses `Rational` stack data
+There is a library, `HForth` that provides a data and control stack as well as a
+number of basic primitives. The data stack is generic. so you can adapt it to
+the base type of your choice. (The example apps use `HForth` with Rationals.)
+As well as the generic data stack type, Strings can be stored on the data stack.
+There is no access to raw addresses.
 
-## Usage
+## Language features
+
+`HForth` has
+
+- some execution control primitives
+  - ':' and ';' define words
+  - `IF` `ELSE` `THEN`
+  - `DO` `LOOP` `I` `J`
+  - `EXIT` `?EXIT` exit (conditionally) the excution of the current word
+  - `<R` `R>` call and return
+  - `EMIT` `KEY` `TYPE` perform IO
+  - `.S` prints the data stack
+  - `'` pops the top of the stack and prints it
+  - `FORK` `KILL` `KILLALL` allow a word to run in parallel, and be terminated
+  - `PAUSE` pauses the current thread
+  - `S"` pushes a string onto the stack.
+  - `'` puts the next word onto the stack and `EXECUTE` executes it
+  - `INCLUDED` reads code from a file
+  - `RECURSIVE` allows /forbids recursive name definitions depending on weithe
+    the top of the stack is true or false
+  - `BYE` quits
+  - `VMSTAT` and `TRACE` provide debugging information
+- local words (enclosed in `{ }` can be defined in a word definition
+- `DROP` `DUP` `OVER` `PICK` `ROT` `SWAP` `2DUP` `0<` `-` are stack primitives
+
+## Tutorial
+
+There is a [tutorial](fs/tutorial.fs) file. The [fs](fs) folder contains some further examples.
+
+## Example Usage
+
+`h-forth` is a bare bones interpreter.
 
 ```sh
-> cabal run  h-forth -- --help
+> cabal run h-forth -- --help
 Up to date
 H-FORTH
 
@@ -23,156 +58,17 @@ Available options:
   -h,--help                Show this help text
 ```
 
-## Language features
+`rat-forth` provides an example of how to define some further basic arithmetic)
+primitive words.
 
-There is a data stack and a return stack.
+To run the tutorial, you need a couple of files defining additional words.
 
-The data stack can store a type that you can specify (eg, Int, Rational, Float) and `String`
-
-Primitive words are:
-
-```Forth
-\
-\   : ;
-\   IF ELSE THEN
-\   DO I J LOOP
-\   { } (LOCAL)
-\   ' EXECUTE
-\   S"
-\   EXIT ?EXIT
-\   FORK KILL KILLALL
-\   BYE
-\   ( ) \
-\
-\   DUP SWAP DROP
-\   OVER ROT 2DUP
-\   0< -
-\
-\   EMIT . .S KEY TYPE
-\   INCLUDED ( S -- )
-\
-\   <R R>
-\
-\   RECURSIVE ( flag -- )
-\   VMSTAT
-\   TRACE ( level -- )
+```sh
+> cabal run rat-forth  --  fs/stdlib.fs  fs/ratlib.fs fs/tutorial.fs
 ```
 
-Further words can be included based on these. For example, using 'Rational' as
-a data stack base type, words from `preForth` can be imported by
+A further example is
 
 ```sh
 > cabal run rat-forth -- fs/preForth-rts.pre fs/preForth-i386-backend.pre fs/preForth.pre
-RAT-FORTH
-LOAD-FILES: fs/preForth-rts.pre,fs/preForth-i386-backend.pre,fs/preForth.pre
-INCLUDED: fs/preForth-rts.pre
-DEFINE: ?dup
-DEFINE: 0=
-DEFINE: negate
-DEFINE: +
-DEFINE: 1+
-DEFINE: 1-
-DEFINE: =
-DEFINE: <
-DEFINE: >
-DEFINE: over
-DEFINE: rot
-DEFINE: nip
-DEFINE: 2drop
-DEFINE: pick
-DEFINE: roll
-DEFINE: case?
-DEFINE: bl
-DEFINE: space
-DEFINE: tab
-DEFINE: cr
-DEFINE: (/mod
-DEFINE: 10*
-DEFINE: (10u/mod
-DEFINE: 10u/mod
-DEFINE: (u.
-DEFINE: u.
-DEFINE: (.
-DEFINE: dec.
-DEFINE: show
-DEFINE: tail
-DEFINE: (_dup
-DEFINE: _dup
-DEFINE: _drop
-DEFINE: (_swap
-DEFINE: _swap
- OK
-INCLUDED: fs/preForth-i386-backend.pre
-DEFINE: replace
-DEFINE: alter
-DEFINE: ."dd"
-DEFINE: >"dd"
-DEFINE: ."db"
-DEFINE: >"db"
-DEFINE: >"ds"
-DEFINE: ."nest"
-DEFINE: ."unnest"
-DEFINE: ."lit"
-DEFINE: ,string
-DEFINE: ,line
-DEFINE: ,word
-DEFINE: ,>word
-DEFINE: ,nest
-DEFINE: ,unnest
-DEFINE: ,n
-DEFINE: ,u
-DEFINE: ,_lit
-DEFINE: ,lit
-DEFINE: ,comment
-DEFINE: label
-DEFINE: body
-DEFINE: ,codefield
-DEFINE: ,code
-DEFINE: ,end-code
-DEFINE: bodylabel
-DEFINE: ,tail
-DEFINE: ."done"
-DEFINE: ."last:"
-DEFINE: ,end
-DEFINE: header
- OK
-INCLUDED: fs/preForth.pre
-DEFINE: skip
-DEFINE: scan
-DEFINE: (line
-DEFINE: line
-DEFINE: token
-DEFINE: ?;
-DEFINE: ?;<
-DEFINE: pre
-DEFINE: code
-DEFINE: ?'x'
-DEFINE: ?digit
-DEFINE: ?'-'
-DEFINE: ((?#
-DEFINE: (?#
-DEFINE: ?-#
-DEFINE: ?+-#
-DEFINE: ?#
-DEFINE: ?lit
-DEFINE: ?\
-DEFINE: ?tail
-DEFINE: ?word
-DEFINE: ]
-DEFINE: (:
-DEFINE: :'
-DEFINE: ?:
-DEFINE: ?code
-DEFINE: ?pre
-DEFINE: quit
-DEFINE: cold
- OK
- OK
--27 dec.
--27 OK
-
 ```
-
-Not supported are
-
-- direct memory access

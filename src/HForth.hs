@@ -267,7 +267,6 @@ pop :: Forth w a a
 pop = pop' >>= dcPlain
 
 popInt :: ForthType a => String -> Forth w a Int
---popInt msg =  pop <&> tyToInt' msg
 popInt msg = tyToInt' msg <$> pop
 
 popr' :: Forth w a (DC a)
@@ -861,8 +860,7 @@ fwExecute = do
 -- | Pause the current thread (seconds)
 fwPause :: (ForthType a) => ForthStep w a
 fwPause = popInt "PAUSE" >>= pauseThread >> next
-  where
-    pauseThread n = when (n > 0) (liftIO (threadDelay (n * 1000000)))
+  where pauseThread n = when (n > 0) (liftIO (threadDelay (n * 1000000)))
 
 -- * Dictionaries
 

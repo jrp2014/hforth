@@ -15,9 +15,9 @@ import           HForth                         ( Dict
                                                 , repl
                                                 )
 import           Options.Applicative            ( (<**>)
-                                                , Alternative(some)
                                                 , ParserInfo
                                                 , argument
+                                                , auto
                                                 , execParser
                                                 , fullDesc
                                                 , header
@@ -25,18 +25,19 @@ import           Options.Applicative            ( (<**>)
                                                 , helper
                                                 , info
                                                 , long
+                                                , many
                                                 , metavar
                                                 , option
-                                                , auto, showDefault, value
                                                 , progDesc
                                                 , short
+                                                , showDefault
                                                 , str
                                                 , switch
+                                                , value
                                                 )
 import           Rational                       ( parseRat
                                                 , ratPp
                                                 )
-import           System.FilePath                ( )
 import           System.IO                      ( stdin )
 
 
@@ -72,7 +73,7 @@ options = info
          <> value 1
          <> metavar "INT"
          )
-  <*>  some (argument str (metavar "[FORTH SOURCE FILENAMES...]"))
+  <*>  many (argument str (metavar "[FORTH SOURCE FILENAMES...]"))
   <**> helper
   )
   (fullDesc <> progDesc "A rudimentary Forth repl written in Haskell" <> header

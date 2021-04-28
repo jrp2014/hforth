@@ -172,6 +172,7 @@ S" STRING" TYPE \ STRING \ TYPE = 6.1.2310 \
 
 \ SIGINT is caught and the next VM operation will raise an error.
 
+1 trace 
 : ENDLESS INF 0 DO S" MSG: " TYPE I . CR 1/10 PAUSE LOOP ;
 
 \ To send SIGINT from EMACS type C-cC-i
@@ -182,7 +183,7 @@ S" STRING" TYPE \ STRING \ TYPE = 6.1.2310 \
 
 \ PAUSE doesn't re-instate interrupts
 
-3 PAUSE \ NON-INTERRUPTIBLE
+5 PAUSE \ NON-INTERRUPTIBLE
 .S
 
 ( Fork Forth )
