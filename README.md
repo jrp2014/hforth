@@ -2,7 +2,7 @@
 
 ## Overview
 
-A Forth-like interpreter framework in Haskell
+A bare bones Forth-like interpreter framework in Haskell
 based on `hsc3-forth` from: http://rohandrape.net/t/hsc3-forth
 
 There is a library, `HForth` that provides a data and control stack as well as a
@@ -40,11 +40,9 @@ There is no access to raw addresses.
 
 There is a [tutorial](fs/tutorial.fs) file. The [fs](fs) folder contains some further examples.
 
-## Example Usage
+## Example usage
 
-`h-forth` is a bare bones interpreter.
-
-```sh
+```console
 > cabal run h-forth -- --help
 Up to date
 H-FORTH
@@ -58,7 +56,7 @@ Available options:
   -h,--help                Show this help text
 ```
 
-`rat-forth` provides an example of how to define some further basic arithmetic)
+`rat-forth` provides an example of how to define some further basic (arithmetic)
 primitive words.
 
 To run the tutorial, you need a couple of files defining additional words.

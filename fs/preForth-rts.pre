@@ -35,11 +35,13 @@
 \ additional stack operators
 \ --------------------------
 
-: over ( x1 x2 -- x1 x2 x1 )
-   >r dup r> swap ;
+\ Already a primitive
+\ : over ( x1 x2 -- x1 x2 x1 )
+\    >r dup r> swap ;
 
-: rot ( x1 x2 x3 -- x2 x3 x1 )
-   >r swap r> swap ;
+\ Already a primitive
+\ : rot ( x1 x2 x3 -- x2 x3 x1 )
+\    >r swap r> swap ;
 
 : nip ( x1 x2 -- x2 )
    swap drop ;
@@ -47,8 +49,9 @@
 : 2drop ( x1 x2 -- )
    drop drop ;
 
-: pick ( xn-1 ... x0 i -- xn-1 ... x0 xi )
-    over swap ?dup 0= ?exit nip swap >r 1- pick r> swap ;  
+\ Already a primitive
+\ : pick ( xn-1 ... x0 i -- xn-1 ... x0 xi )
+\     over swap ?dup 0= ?exit nip swap >r 1- pick r> swap ;  
 
 : roll ( xn-1 ... x0 i -- xn-1 ... xi-1 xi+1 ... x0 xi )
     ?dup 0= ?exit swap >r 1- roll r> swap ;
