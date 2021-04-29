@@ -29,12 +29,12 @@ There is no access to raw addresses.
   - `S"` pushes a string onto the stack.
   - `'` puts the next word onto the stack and `EXECUTE` executes it
   - `INCLUDED` reads code from a file
-  - `RECURSIVE` allows /forbids recursive name definitions depending on weithe
-    the top of the stack is true or false
   - `BYE` quits
   - `VMSTAT` and `TRACE` provide debugging information
 - local words (enclosed in `{ }` can be defined in a word definition
 - `DROP` `DUP` `OVER` `PICK` `ROT` `SWAP` `2DUP` `0<` `-` are stack primitives
+- `RECURSIVE` allows / forbids recursive name definitions depending on whether
+  the top of the stack is true or false
 
 ## Tutorial
 
