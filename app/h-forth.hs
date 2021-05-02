@@ -13,6 +13,7 @@ import           HForth                         ( Dict
                                                 , fwUndefined
                                                 , loadFiles
                                                 , repl
+                                                , VMMemory (..)
                                                 )
 import           Options.Applicative            ( (<**>)
                                                 , ParserInfo
@@ -85,13 +86,14 @@ main = do
   opts <- execParser options
   sig  <- newMVar False
   let args = includeLibraries opts
-  let d :: Dict () Rational
+  let d :: Dict () Rational []
       d  = coreDict
       vm = (emptyVm () parseRat sig)
         { dict      = d
         , inputPort = Just stdin
         , tracing   = tracelevel opts
         , recursive = if allowRecursive opts then fwUndefined else Nothing
+        , vMMemory = Just $ replicate 1000 0
         }
       initF = loadFiles args
   repl vm initF

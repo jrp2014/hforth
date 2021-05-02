@@ -2,6 +2,9 @@
 {-# LANGUAGE FlexibleContexts   #-}
 {-# LANGUAGE LambdaCase         #-}
 {-# LANGUAGE StrictData         #-}
+{-# LANGUAGE MultiParamTypeClasses         #-}
+{-# LANGUAGE FlexibleInstances         #-}
+{-# LANGUAGE AllowAmbiguousTypes         #-}
 module HForth where
 
 import           Control.Concurrent             ( MVar
@@ -23,6 +26,7 @@ import           Control.Monad.State            ( MonadIO(liftIO)
                                                 , StateT(runStateT)
                                                 , modify
                                                 )
+import           Data.Array
 import           Data.Char                      ( isSpace
                                                 , toLower
                                                 )
@@ -43,7 +47,7 @@ import qualified System.Posix.Signals          as P
 -- * Virtual Machine
 
 -- | A dictionary is a map of named instructions ('Forth's).
-type Dict w a = M.Map String (ForthStep w a)
+type Dict w a m = M.Map String (ForthStep w a m)
 
 -- | Class of values that can constitute a 'Forth'.
 class ForthType a where
@@ -53,7 +57,7 @@ class ForthType a where
     tyFromBool :: Bool -> a -- ^ Boolean value represented in /a/, by convention @-1@ and @0@.
 
 tyToInt' :: ForthType a => String -> a -> Int
-tyToInt' msg = fromMaybe (error ("NOT-INTEGER: " ++ msg)) . tyToInt
+tyToInt' msg = fromMaybe (error ("NOT-INT: " ++ msg)) . tyToInt
 
 instance ForthType Int where
   tyShow    = show
@@ -77,42 +81,61 @@ instance ForthType a => Show (DC a) where
     DCXT     str -> "XT:" ++ str
 
 -- | Extract plain value from 'DC', else error.
-dcPlain :: DC a -> Forth w a a
+dcPlain :: DC a -> Forth w a m  a
 dcPlain dc = case dc of
   DC a -> return a
   _    -> throwError "DC-NOT-VALUE-CELL"
 
 -- | A compilation cell, for the compilation stack.
-data CC w a = CCWord String | CCForth (ForthStep w a)
+data CC w a m = CCWord String | CCForth (ForthStep w a m)
 
 -- | Predicate to see if 'CC' is a particular 'CCWord'.
-ccIsWord :: String -> CC w a -> Bool
+ccIsWord :: String -> CC w a m -> Bool
 ccIsWord w cw = case cw of
   CCWord w' -> w == w'
   _         -> False
 
+-- | Int-indexed memory, type constructor @m@, index type @i@, and elememt type @e@
+class Memory m e where
+  fetch :: ForthType i => m e -> i -> e
+  store :: ForthType i => m e -> i -> e -> m e
+
+instance Memory [] e where
+  fetch mem ix = mem !! tyToInt' "FETCH" ix
+  store mem ix e = take ix' mem ++ e : drop (ix' + 1) mem
+    where ix' = tyToInt' "STORE" ix
+
+instance Memory (Array Int) e where
+  fetch mem ix = mem ! tyToInt' "FETCH" ix -- TODO should have a tyToIx
+  store mem ix e = mem // [(tyToInt' "STORE" ix, e)]
+
+type VMMemory m e = m e
+
+
 -- | The machine is either interpreting or compiling.
 data VMMode = Interpret | Compile deriving stock (Eq,Show)
 
--- | The machine, /w/ is the type of the world, /a/ is the type of the stack elements.
-data VM w a = VM
+-- | The machine, /w/ is the type of the world, /a/ is the type of the stack elements,
+-- /m/ is the memory container type.
+data VM w a m = VM
   { stack     :: [DC a] -- ^ The data stack, /the/ stack.
   , rstack    :: [DC a] -- ^ The return stack.
-  , cstack    :: [CC w a] -- ^ The compilation stack.
+  , cstack    :: [CC w a m] -- ^ The compilation stack.
   , threads   :: M.Map Int ThreadId
-  , dict      :: Dict w a -- ^ The dictionary.
-  , locals    :: [Dict w a] -- ^ The stack of locals dictionaries.
+  , dict      :: Dict w a m -- ^ The dictionary.
+  , locals    :: [Dict w a m] -- ^ The stack of locals dictionaries.
   , buffer    :: String -- ^ The current line of input text.
   , mode      :: VMMode -- ^ Basic state of the machine - compiling or interpreting.
   , world     :: w -- ^ The world, instance state.
   , literal   :: String -> Maybe a -- ^ Read function for literal values.
-  , recursive :: Maybe (String -> ForthStep w a) -- ^ Allow recursive word definitions
+  , recursive :: Maybe (String -> ForthStep w a m) -- ^ Allow recursive word definitions
   , inputPort :: Maybe Handle -- ^ eg, @Just stdin@
   , tracing   :: Int -- ^ for debugging
   , sigint    :: MVar Bool -- ^ True if a SIGINT signal (user interrupt) has been received.
+  , vMMemory  :: Maybe (VMMemory m a)
   }
 
-instance ForthType a => Show (VM w a) where
+instance (ForthType a) => Show (VM w a m) where
   show vm = concat
     [ "\n DATA STACK: "
     , unwords (map show (reverse $ stack vm))
@@ -136,29 +159,29 @@ instance ForthType a => Show (VM w a) where
     , maybe "NO" (const "YES") (inputPort vm)
     , "\n TRACING: "
     , show (tracing vm)
+    , "\n MEMORY: "
+    , maybe "NO" (const "YES") (vMMemory vm)
     ]
 
 -- | Signals (exceptions) from 'VM'.
 data VMSignal = VMEOF | VMNoInput | VMError String deriving stock (Eq,Show)
 
 -- | An instruction, the implementation of a /word/.
-type Forth w a r = CME.ExceptT VMSignal (StateT (VM w a) IO) r
+type Forth w a m r = CME.ExceptT VMSignal (StateT (VM w a m) IO) r
 
 data Continue = Next | Exit deriving stock Show
 
 -- | The result of intpreting an instruction: Left = exit, Right () = continue
-type ForthStep w a = Forth w a Continue
+type ForthStep w a m  = Forth w a m Continue
 
-next :: ForthStep w a
+next :: ForthStep w a m
 next = return Next
 
-exit :: ForthStep w a
+exit :: ForthStep w a m
 exit = return Exit
 
-
-
 -- | Make an empty (initial) machine.
-emptyVm :: w -> (String -> Maybe a) -> MVar Bool -> VM w a
+emptyVm :: w -> (String -> Maybe a) -> MVar Bool -> VM w a m
 emptyVm w lit sig = VM { stack     = []
                        , rstack    = []
                        , cstack    = []
@@ -173,20 +196,22 @@ emptyVm w lit sig = VM { stack     = []
                        , inputPort = Nothing
                        , tracing   = -1
                        , sigint    = sig
+                       , vMMemory  = Nothing
                        }
 
 -- | Reset 'VM', on error.
-vmReset :: VM w a -> VM w a
+vmReset :: VM w a m  -> VM w a m
 vmReset vm = vm { stack  = []
                 , rstack = []
                 , cstack = []
                 , buffer = ""
                 , mode   = Interpret
                 , locals = []
+                , vMMemory = error "Memory reset unimplemented"
                 }
 
 -- | Type specialised variant of 'get' that checks SIGINT handler.
-getVm :: Forth w a (VM w a)
+getVm :: Forth w a m (VM w a m)
 getVm = do
   vm  <- get
   sig <- liftIO (modifyMVar (sigint vm) (\s -> return (False, s)))
@@ -194,94 +219,94 @@ getVm = do
   return vm
 
 -- | Function with 'VM'.
-withVm :: (VM w a -> (VM w a, r)) -> Forth w a r
+withVm :: (VM w a m -> (VM w a m, r)) -> Forth w a m r
 withVm f = getVm >>= \vm -> let (vm', r) = f vm in put vm' >> return r
 
 -- | Procedure with 'VM'.
-doWithVm :: (VM w a -> Forth w a (VM w a)) -> Forth w a ()
+doWithVm :: (VM w a m -> Forth w a m (VM w a m)) -> Forth w a m ()
 doWithVm f = getVm >>= (f >=> put)
 
 -- | Change the world.
-vmModifyWorld :: (w -> w) -> Forth w a ()
+vmModifyWorld :: (w -> w) -> Forth w a m ()
 vmModifyWorld f = modify (\vm -> vm { world = f (world vm) })
 
 -- * Error
 
 -- | Tracer, levels are 2 = HIGH, 1 = MEDIUM, 0 = LOW
-trace :: Int -> String -> Forth w a ()
+trace :: Int -> String -> Forth w a m ()
 trace k msg = do
   vm <- getVm
   when (k <= tracing vm) (void $ writeLn msg)
 
-throwError :: String -> Forth w a r
+throwError :: String -> Forth w a m r
 throwError = CME.throwError . VMError
 
 -- | Reader that raises an /unknown word/ error.
-unknownError :: String -> Forth w a r
+unknownError :: String -> Forth w a m r
 unknownError s = throwError ("UNKNOWN WORD: " ++ tickQuotes s)
 
 -- | Reader that raises an /unimplemented word/ error.
-notImplementedError :: String -> Forth w a r
+notImplementedError :: String -> Forth w a m r
 notImplementedError s = throwError ("UNIMPLEMENTED WORD: " ++ tickQuotes s)
 
 -- * Stack
 
-push' :: DC a -> ForthStep w a
+push' :: DC a -> ForthStep w a m
 push' x = do
   modify (\vm -> vm { stack = x : stack vm })
   next
 
 -- | Push value onto 'stack'.
-push :: a -> ForthStep w a
+push :: a -> ForthStep w a m
 push = push' . DC
 
-pushr' :: DC a -> ForthStep w a
+pushr' :: DC a -> ForthStep w a m
 pushr' x = do
   modify (\vm -> vm { rstack = x : rstack vm })
   next
 
 -- | Push value onto 'rstack'.
-pushr :: a -> ForthStep w a
+pushr :: a -> ForthStep w a m
 pushr = pushr' . DC
 
 -- | Push value onto 'cstack'.
-pushc :: CC w a -> ForthStep w a
+pushc :: CC w a m -> ForthStep w a m
 pushc x = do
   modify (\vm -> vm { cstack = x : cstack vm })
   next
 
 -- | Pop indicated 'VM' stack.
 popVmStack
-  :: String -> (VM w a -> [r]) -> (VM w a -> [r] -> VM w a) -> Forth w a r
+  :: String -> (VM w a m -> [r]) -> (VM w a m -> [r] -> VM w a m) -> Forth w a m r
 popVmStack nm f g = do
   vm <- getVm
   case f vm of
     []     -> throwError (nm ++ ": STACK UNDERFLOW")
     x : xs -> put (g vm xs) >> return x
 
-pop' :: Forth w a (DC a)
+pop' :: Forth w a m (DC a)
 pop' = popVmStack "DATA" stack (\vm s -> vm { stack = s })
 
 -- | Remove value from 'stack'.
-pop :: Forth w a a
+pop :: Forth w a m a
 pop = pop' >>= dcPlain
 
-popInt :: ForthType a => String -> Forth w a Int
+popInt :: ForthType a => String -> Forth w a m Int
 popInt msg = tyToInt' msg <$> pop
 
-popr' :: Forth w a (DC a)
+popr' :: Forth w a m (DC a)
 popr' = popVmStack "RETURN" rstack (\vm s -> vm { rstack = s })
 
 -- | Remove value from 'rstack'.
-popr :: Forth w a a
+popr :: Forth w a m a
 popr = popr' >>= dcPlain
 
 -- | Remove value from 'cstack'.
-popc :: Forth w a (CC w a)
+popc :: Forth w a m (CC w a m)
 popc = popVmStack "COMPILE" cstack (\vm s -> vm { cstack = s })
 
 -- | ( id len -- )
-popString :: String -> Forth w a String
+popString :: String -> Forth w a m String
 popString msg = do
   vm <- getVm
   case stack vm of
@@ -300,7 +325,7 @@ exprPp e = case e of
   Word    nm -> nm
 
 -- | Dictionary lookup, word should be lower case.
-lookupWord :: String -> VM w a -> Maybe (ForthStep w a)
+lookupWord :: String -> VM w a m -> Maybe (ForthStep w a m)
 lookupWord k vm = case locals vm of
   []    -> M.lookup k (dict vm)
   l : _ -> case M.lookup k l of
@@ -308,7 +333,7 @@ lookupWord k vm = case locals vm of
     r       -> r
 
 -- | Parse a token string to an expression.
-parseToken :: String -> Forth w a (Expr a)
+parseToken :: String -> Forth w a m (Expr a)
 parseToken s = do
   vm <- getVm
   case lookupWord s vm of
@@ -323,7 +348,7 @@ parseToken s = do
         Nothing -> unknownError s
 
 -- | Read buffer until predicate holds, if /pre/ delete preceding white space.
-readUntil :: Bool -> (Char -> Bool) -> Forth w a (String, String)
+readUntil :: Bool -> (Char -> Bool) -> Forth w a m (String, String)
 readUntil pre cf = do
   vm <- getVm
   let f = if pre then dropWhile isSpace else id
@@ -332,13 +357,13 @@ readUntil pre cf = do
   put vm { buffer = snd r }
   return r
 
-scanUntil :: (Char -> Bool) -> Forth w a String
+scanUntil :: (Char -> Bool) -> Forth w a m String
 scanUntil = fmap fst . readUntil False
 
 -- | Scan a token from 'buffer', ANS Forth type comments are
 -- discarded.  Although 'buffer' is filled by 'hGetLine' it may
 -- contain newline characters because we may include a file.
-scanToken :: Forth w a (Maybe String)
+scanToken :: Forth w a m (Maybe String)
 scanToken = do
   r <- readUntil True isSpace
   case r of
@@ -355,7 +380,7 @@ scanToken = do
 -- | Read line from 'inputPort' to 'buffer'.  There are two
 -- /exceptions/ thrown here, 'VMEOF' if an input port is given but
 -- returns EOF, and 'VMNoInput' if there is no input port.
-fwRefill :: ForthStep w a
+fwRefill :: ForthStep w a m
 fwRefill = do
   vm <- getVm
   case inputPort vm of
@@ -369,7 +394,7 @@ fwRefill = do
       next
 
 -- | If 'scanToken' is 'Nothing', then 'fwRefill' and retry.  Tokens are lower case.
-readToken :: Forth w a String
+readToken :: Forth w a m String
 readToken = do
   r <- scanToken
   case r of
@@ -377,13 +402,13 @@ readToken = do
     Nothing  -> fwRefill >> readToken
 
 -- | 'parseToken' of 'readToken'.
-readExpr :: Forth w a (Expr a)
+readExpr :: Forth w a m (Expr a)
 readExpr = parseToken =<< readToken
 
 -- * Interpret
 
 -- | 'lookupWord' in the dictionary
-interpretWord :: String -> ForthStep w a
+interpretWord :: String -> ForthStep w a m
 interpretWord w = do
   vm <- getVm
   trace 3 ("INTERPRETWORD: " ++ w)
@@ -400,19 +425,19 @@ interpretWord w = do
 
 
 -- | Either 'interpretWord' or 'push' literal.
-interpretExpr :: Expr a -> ForthStep w a
+interpretExpr :: Expr a -> ForthStep w a m
 interpretExpr e = case e of
   Word    w -> interpretWord w
   Literal a -> push a
 
 -- | 'interpretExpr' of 'readExpr'.
-vmInterpret :: ForthStep w a
+vmInterpret :: ForthStep w a m
 vmInterpret = readExpr >>= interpretExpr
 
 -- * Compile
 
 -- | Define word and add to dictionary.  The only control structures are /if/ and /do/.
-vmCompile :: (Eq a, ForthType a) => ForthStep w a
+vmCompile :: (Eq a, ForthType a) => ForthStep w a m
 vmCompile = do
   expr <- readExpr
   trace 2 ("COMPILE: " ++ exprPp expr)
@@ -433,13 +458,13 @@ vmCompile = do
     e            -> pushc (CCForth (interpretExpr e))
 
 -- | Get instruction at 'CC' or raise an error.
-cwInstr :: CC w a -> ForthStep w a
+cwInstr :: CC w a m -> ForthStep w a m
 cwInstr cw = case cw of
   CCWord  w -> throwError ("cwInstr: WORD: " ++ w)
   CCForth f -> f
 
 -- | Type specialised 'foldl1' of '>>'.
-forthBlock :: [ForthStep w a] -> ForthStep w a
+forthBlock :: [ForthStep w a m] -> ForthStep w a m
 forthBlock []       = next
 forthBlock (i : is) = i >>= \case
   Exit -> next
@@ -448,17 +473,17 @@ forthBlock (i : is) = i >>= \case
 --forthBlock = foldl1 (>>)
 
 -- | Add a 'locals' frame.
-beginLocals :: ForthStep w a
+beginLocals :: ForthStep w a m
 beginLocals = withVm (\vm -> (vm { locals = M.empty : locals vm }, Next))
 
 -- | Remove a 'locals' frame.
-endLocals :: ForthStep w a
+endLocals :: ForthStep w a m
 endLocals = withVm (\vm -> (vm { locals = tail (locals vm) }, Next))
 
 -- | Unwind the 'cstack' to the indicated control word.  The result is
 -- the code block, in sequence.  The control word is also removed from
 -- the cstack.
-unwindCstackTo :: String -> Forth w a [CC w a]
+unwindCstackTo :: String -> Forth w a m [CC w a m]
 unwindCstackTo w = do
   withVm
     (\vm ->
@@ -467,25 +492,25 @@ unwindCstackTo w = do
     )
 
 -- | Either 'vmInterpret' or 'vmCompile', depending on 'mode'.
-vmExecute :: (Eq a, ForthType a) => ForthStep w a
+vmExecute :: (Eq a, ForthType a) => ForthStep w a m
 vmExecute = do
   vm <- getVm
   case mode vm of
     Interpret -> vmInterpret
     Compile   -> vmCompile
 
-vmExecuteBuffer :: (ForthType a, Eq a) => VM w a -> IO (VM w a)
+vmExecuteBuffer :: (ForthType a, Eq a) => VM w a m -> IO (VM w a m)
 vmExecuteBuffer vm = do
   (r, vm') <- runStateT (CME.runExceptT vmExecute) vm
   case r of
     Left err -> case err of
       VMNoInput   -> return vm'
-      VMEOF       -> die "VMEXECUTEBUFFER: VMVOF"
+      VMEOF       -> die "VMEXECUTEBUFFER: VMEOF"
       VMError msg -> die
         (  "VMEXECUTEBUFFER: "
         ++ msg
         ++ " before '"
-        ++ head (lines (buffer vm'))
+        ++ buffer vm'
         ++ "'"
         )
     Right Next -> vmExecuteBuffer vm'
@@ -494,7 +519,7 @@ vmExecuteBuffer vm = do
 -- * DO LOOP
 
 -- | A loop ends when the two elements at the top of the rstack are equal.
-loopEnd :: Eq a => Forth w a Bool
+loopEnd :: Eq a => Forth w a m Bool
 loopEnd = do
   vm <- getVm
   case rstack vm of
@@ -502,7 +527,7 @@ loopEnd = do
     _               -> throwError "LOOP-END: ILLEGAL RSTACK"
 
 -- | /code/ is the expressions between @do@ and @loop@.
-interpretDoLoop :: (ForthType a, Eq a) => ForthStep w a -> ForthStep w a
+interpretDoLoop :: (ForthType a, Eq a) => ForthStep w a m -> ForthStep w a m
 interpretDoLoop code = do
   start <- pop
   end   <- pop
@@ -522,36 +547,36 @@ interpretDoLoop code = do
   loop
 
 -- | Compile @loop@ statement, end of do block.
-fwLoop :: (Eq a, ForthType a) => ForthStep w a
+fwLoop :: (Eq a, ForthType a) => ForthStep w a m
 fwLoop = do
   cw <- unwindCstackTo "do"
   let w = forthBlock (map cwInstr cw)
   pushc (CCForth (interpretDoLoop w))
 
 -- | placeholder for deferred definitions
-fwUndefined :: Maybe (String -> ForthStep w a)
+fwUndefined :: Maybe (String -> ForthStep w a m)
 fwUndefined = Just u
   where u s = forthBlock [writeLn $ s ++ " is undfined", fwExit]
 
 -- | @exit@ statement
-fwExit :: ForthStep w a
+fwExit :: ForthStep w a m
 fwExit = exit -- short circuit
 
 -- | @?exit@ statement
-fwQExit :: (Eq a, ForthType a) => ForthStep w a
+fwQExit :: (Eq a, ForthType a) => ForthStep w a m
 fwQExit = interpretIf (fwExit, next)
 
 -- * IF ELSE THEN
 
 -- | Consult stack and select either /true/ or /false/.
 interpretIf
-  :: (Eq a, ForthType a) => (ForthStep w a, ForthStep w a) -> ForthStep w a
+  :: (Eq a, ForthType a) => (ForthStep w a m, ForthStep w a m) -> ForthStep w a m
 interpretIf (t, f) = pop >>= \x -> do
   trace 3 ("INTERPRETIF: " ++ tyShow x)
   if x /= tyFromBool False then t else f
 
 -- | Compile @then@ statement, end of @if@ block.
-fwThen :: (Eq a, ForthType a) => ForthStep w a
+fwThen :: (Eq a, ForthType a) => ForthStep w a m
 fwThen = do
   cw <- unwindCstackTo "if"
   let f = forthBlock . map cwInstr
@@ -562,7 +587,7 @@ fwThen = do
 -- * LOCALS
 
 -- | Variant on @(local)@, argument not on stack.
-fwLocal' :: String -> ForthStep w a
+fwLocal' :: String -> ForthStep w a m
 fwLocal' nm = do
   vm <- getVm
   case stack vm of
@@ -577,7 +602,7 @@ fwLocal' nm = do
     _ -> throwError ("(LOCAL): STACK UNDERFLOW: " ++ nm)
 
 -- | Function over current locals 'Dict'.
-atCurrentLocals :: (Dict w a -> Dict w a) -> VM w a -> VM w a
+atCurrentLocals :: (Dict w a m -> Dict w a m) -> VM w a m -> VM w a m
 atCurrentLocals f vm = case locals vm of
   l : l' -> vm { locals = f l : l' }
   _      -> error "ATCURRENTLOCALS"
@@ -587,8 +612,8 @@ atCurrentLocals f vm = case locals vm of
 -- know if an interpreter 'locals' frame must be made.  In
 -- interpretation, if required, it is a secondary dictionary,
 -- consulted first.
---fwOpenBrace :: ForthType a => ForthStep w a
-fwOpenBrace :: ForthStep w a
+--fwOpenBrace :: ForthType a => ForthStep w a m
+fwOpenBrace :: ForthStep w a m
 fwOpenBrace = do
   let getNames r = do
         w <- readToken
@@ -605,7 +630,7 @@ fwOpenBrace = do
 
 -- | ":". Enter compile phase, the word name is pushed onto the
 -- /empty/ 'cstack', and a 'locals' frame is added.
-fwColon :: ForthStep w a
+fwColon :: ForthStep w a m
 fwColon = do
   nm <- readToken
   trace 0 ("DEFINE: " ++ nm)
@@ -624,7 +649,7 @@ fwColon = do
 
 -- | ";".  End compile phase.  There is always a compile 'locals'
 -- frame to be removed.
-fwSemiColon :: ForthStep w a
+fwSemiColon :: ForthStep w a m
 fwSemiColon = do
   vm <- getVm
   case reverse (cstack vm) of
@@ -649,23 +674,23 @@ fwSemiColon = do
 
 -- * STRINGS
 
-fwSQuoteCompiler :: ForthType a => ForthStep w a
+fwSQuoteCompiler :: ForthType a => ForthStep w a m
 fwSQuoteCompiler = do
   str <- scanUntil (== '"')
   trace 2 ("COMPILE: S\": \"" ++ str ++ "\"")
   pushc (CCForth (pushStr str))
 
-fwSQuoteInterpet :: ForthType a => ForthStep w a
+fwSQuoteInterpet :: ForthType a => ForthStep w a m
 fwSQuoteInterpet = scanUntil (== '"') >>= pushStr
 
-fwType :: ForthStep w a
+fwType :: ForthStep w a m
 fwType = (popString "TYPE" >>= write) >> next
 
 -- * Forth words
 
 -- | Store current buffer & input port, place input string on buffer
 -- with no input port, 'vmExecuteBuffer', restore buffer & port.
-fwEvaluate' :: (Eq a, ForthType a) => String -> ForthStep w a
+fwEvaluate' :: (Eq a, ForthType a) => String -> ForthStep w a m
 fwEvaluate' str = do
   vm <- getVm
   let buf = buffer vm
@@ -675,21 +700,21 @@ fwEvaluate' str = do
   next
 
 -- | Variant on @included@, argument not on stack.
-fwIncluded' :: (Eq a, ForthType a) => FilePath -> ForthStep w a
+fwIncluded' :: (Eq a, ForthType a) => FilePath -> ForthStep w a m
 fwIncluded' nm = do
   trace 0 ("INCLUDED: " ++ nm)
   x <- liftIO (doesFileExist nm)
   unless x (throwError ("INCLUDED': FILE MISSING: " ++ tickQuotes nm))
   liftIO (readFile nm) >>= fwEvaluate'
 
-fwIncluded :: (Eq a, ForthType a) => ForthStep w a
+fwIncluded :: (Eq a, ForthType a) => ForthStep w a m
 fwIncluded = popString "INCLUDED" >>= fwIncluded'
 
-fwI :: ForthStep w a
+fwI :: ForthStep w a m
 fwI = popr >>= \x -> pushr x >> push x
 
 -- | Forth word @j@.
-fwJ :: ForthStep w a
+fwJ :: ForthStep w a m
 fwJ = do
   x     <- popr
   y     <- popr
@@ -701,7 +726,7 @@ fwJ = do
 
 -- Apply comparison with top of stack
 -- (optimized version of comparisonOp)  Not used
-comparison :: ForthType a => (a -> Bool) -> ForthStep w a
+comparison :: ForthType a => (a -> Bool) -> ForthStep w a m
 comparison cmp = do
   vm <- getVm
   case stack vm of
@@ -711,7 +736,7 @@ comparison cmp = do
     _ -> throwError "comparison"
 
 -- | Apply comparison with top of stack
-binOp :: (a -> a -> a) -> ForthStep w a
+binOp :: (a -> a -> a) -> ForthStep w a m
 binOp op = do
   vm <- getVm
   case stack vm of
@@ -721,23 +746,23 @@ binOp op = do
     _ -> throwError "binop"
 
 -- | Binary stack operation.  The first value on the stack is the RHS.
-binaryOp :: (a -> a -> a) -> ForthStep w a
+binaryOp :: (a -> a -> a) -> ForthStep w a m
 binaryOp f = pop >>= \y -> pop >>= \x -> push (f x y)
 
 -- | Unary stack operation.
-unaryOp :: (a -> a) -> ForthStep w a
+unaryOp :: (a -> a) -> ForthStep w a m
 unaryOp f = pop >>= push . f
 
 -- | comparison operation
-comparisonOp :: ForthType a => (a -> a -> Bool) -> ForthStep w a
+comparisonOp :: ForthType a => (a -> a -> Bool) -> ForthStep w a m
 comparisonOp f = binaryOp (\x y -> tyFromBool (f x y))
 
-predicateOp :: ForthType a => (a -> Bool) -> ForthStep w a
+predicateOp :: ForthType a => (a -> Bool) -> ForthStep w a m
 predicateOp f = unaryOp (tyFromBool . f)
 
 -- | dup : ( p -- p p ) swap : ( p q -- q p ) drop : ( p -- ) over : (
 -- p q -- p q p ) rot : ( p q r -- q r p ) 2dup : ( p q -- p q p q )
-fwDup, fwSwap, fwDrop, fwOver, fwRot, fw2dup :: ForthStep w a
+fwDup, fwSwap, fwDrop, fwOver, fwRot, fw2dup :: ForthStep w a m
 fwDup = pop' >>= \e -> push' e >> push' e
 fwSwap = pop' >>= \p -> pop' >>= \q -> push' p >> push' q
 fwDrop = do
@@ -750,7 +775,7 @@ fwRot =
 fw2dup = pop' >>= \p -> pop' >>= \q -> push' q >> push' p >> push' q >> push' p
 
 -- | ( xu ... x1 x0 u -- xu ... x1 x0 xu )
-fwPick :: ForthType a => ForthStep w a
+fwPick :: ForthType a => ForthStep w a m
 fwPick = do
   vm <- getVm
   case stack vm of
@@ -763,22 +788,22 @@ fwPick = do
     _ -> throwError "PICK"
 
 -- | fwGTR (>r)
-fwGTR :: ForthStep w a
+fwGTR :: ForthStep w a m
 fwGTR = pop' >>= pushr'
 
 -- | fwRGT (r>)
-fwRGT :: ForthStep w a
+fwRGT :: ForthStep w a m
 fwRGT = popr' >>= push'
 
 -- | 0<
-fw0LT :: (Ord a, ForthType a) => ForthStep w a
+fw0LT :: (Ord a, ForthType a) => ForthStep w a m
 fw0LT = predicateOp (< tyFromInt 0)
 
 -- | -
-fwMinus :: (Num a) => ForthStep w a
+fwMinus :: (Num a) => ForthStep w a m
 fwMinus = binaryOp (-)
 
-write, writeLn, writeSp :: String -> ForthStep w a
+write, writeLn, writeSp :: String -> ForthStep w a m
 write s = do
   (liftIO . putStr) s
   next
@@ -787,21 +812,21 @@ writeLn s = do
 writeSp s = do
   (write . (++ " ")) s
 
-fwEmit, fwDot :: ForthType a => ForthStep w a
+fwEmit, fwDot :: ForthType a => ForthStep w a m
 fwEmit = write . return . toEnum =<< popInt "EMIT"
 fwDot = writeSp . show =<< pop'
 
-fwDotS :: ForthType a => ForthStep w a
+fwDotS :: ForthType a => ForthStep w a m
 fwDotS = do
   vm <- getVm
   let l = map show (reverse (stack vm))
       n = "<" ++ show (length l) ++ "> "
   write (n ++ concatMap (++ " ") l)
 
-fwBye :: ForthStep w a
+fwBye :: ForthStep w a m
 fwBye = liftIO exitSuccess
 
-pushStr :: ForthType a => String -> ForthStep w a
+pushStr :: ForthType a => String -> ForthStep w a m
 pushStr str =
   let f vm =
         ( vm { stack = DC (tyFromInt (length str)) : DCString str : stack vm }
@@ -809,10 +834,10 @@ pushStr str =
         )
   in  withVm f
 
-fwVmStat :: ForthType a => ForthStep w a
+fwVmStat :: ForthType a => ForthStep w a m
 fwVmStat = getVm >>= writeLn . show
 
-fwFork :: ForthType a => ForthStep w a
+fwFork :: ForthType a => ForthStep w a m
 fwFork = do
   nm <- readToken
   vm <- getVm
@@ -826,7 +851,7 @@ fwFork = do
       next
     Nothing -> throwError ("FORK: UNKNOWN WORD: " ++ nm)
 
-fwKill :: ForthType a => ForthStep w a
+fwKill :: ForthType a => ForthStep w a m
 fwKill = do
   k  <- popInt "KILL: PID?"
   vm <- getVm
@@ -837,7 +862,7 @@ fwKill = do
       liftIO (killThread th) >> put vm { threads = M.delete k threads' }
       next
 
-fwKillAll :: ForthStep w a
+fwKillAll :: ForthStep w a m
 fwKillAll = do
   vm <- getVm
   let th = M.elems (threads vm)
@@ -845,12 +870,12 @@ fwKillAll = do
   put vm { threads = M.empty }
   next
 
-fwQuote :: ForthStep w a
+fwQuote :: ForthStep w a m
 fwQuote = do
   tok <- readToken
   push' (DCXT tok)
 
-fwExecute :: ForthStep w a
+fwExecute :: ForthStep w a m
 fwExecute = do
   c <- pop'
   case c of
@@ -858,13 +883,32 @@ fwExecute = do
     _       -> throwError "EXECUTE: NOT EXECUTION TOKEN"
 
 -- | Pause the current thread (seconds)
-fwPause :: (ForthType a) => ForthStep w a
+fwPause :: (ForthType a) => ForthStep w a m
 fwPause = popInt "PAUSE" >>= pauseThread >> next
   where pauseThread n = when (n > 0) (liftIO (threadDelay (n * 1000000)))
 
+fwFetch :: (ForthType a, Memory m a)  => ForthStep w a m
+fwFetch = do
+  vm <- getVm
+  addr <- popInt "FWFETCH"
+  let mem = fromMaybe (error "NO MEMORY FROM WHICH TO FETCH")
+  push (fetch (mem (vMMemory vm)) addr)
+
+fwStore :: (ForthType a, Memory m a) => ForthStep w a m
+fwStore = do
+  addr <- popInt "FWSTOR ADDRESS"
+  value <- pop
+  let mem = fromMaybe (error "NO MEMORY TO WHICH TO STORE")
+  let f vm =
+        ( vm {vMMemory = Just $ store (mem (vMMemory vm)) addr value},
+          Next
+        )
+   in withVm f
+
+
 -- * Dictionaries
 
-coreDict :: (Ord a, Num a, ForthType a) => Dict w a
+coreDict :: (Ord a, Num a, ForthType a, Memory m a) => Dict w a m
 coreDict =
   let err nm =
         throwError (tickQuotes nm ++ ": compiler word in interpeter context")
@@ -922,6 +966,9 @@ coreDict =
       , ("."     , fwDot)
       , (".s"    , fwDotS)
       , ("key", liftIO getChar >>= \c -> push (tyFromInt (fromEnum c)))
+  -- MEMORY
+      , ("!"     , fwStore)
+      , ("@"     , fwFetch)
   -- DEBUG
       , ("vmstat", fwVmStat)
       , ( "trace"
@@ -931,14 +978,14 @@ coreDict =
       ]
 
 coreWords :: [String]
-coreWords = M.keys (coreDict :: Dict w Integer)
+coreWords = M.keys (coreDict ::  Dict w Integer [])
 
 isReservedWord :: String -> Bool
 isReservedWord nm = nm `elem` coreWords
 
 -- * Operation
 
-execErr :: VM w a -> ForthStep w a -> IO (VM w a)
+execErr :: VM w a m -> ForthStep w a m -> IO (VM w a m)
 execErr vm fw = do
   (r, vm') <- runStateT (CME.runExceptT fw) vm
   case r of
@@ -948,7 +995,7 @@ execErr vm fw = do
 
 -- | Read, evaluate, print, loop.  Prints @OK@ at end of line.  Prints
 -- error message and runs 'vmReset' on error.
-repl' :: (Eq a, ForthType a) => VM w a -> IO ()
+repl' :: (Eq a, ForthType a) => VM w a m -> IO ()
 repl' vm = do
   (r, vm') <- runStateT (CME.runExceptT vmExecute) vm
   case r of
@@ -959,7 +1006,7 @@ repl' vm = do
     Right Next -> repl' vm'
     Right Exit -> repl' vm'
 
-catchSigint :: VM w a -> IO ()
+catchSigint :: VM w a m -> IO ()
 catchSigint vm = do
   let h = modifyMVar_ (sigint vm) (return . const True)
   _ <- P.installHandler P.sigINT (P.Catch h) Nothing
@@ -967,7 +1014,7 @@ catchSigint vm = do
   return ()
 
 -- | 'repl'' but with 'catchSigint'.
-repl :: (ForthType a, Eq a) => VM w a -> ForthStep w a -> IO ()
+repl :: (ForthType a, Eq a) => VM w a m -> ForthStep w a m -> IO ()
 repl vm initF = do
   catchSigint vm
   (r, vm') <- runStateT (CME.runExceptT initF) vm
@@ -979,7 +1026,7 @@ repl vm initF = do
     Right Next -> repl' vm'
     Right Exit -> repl' vm'
 
-loadFiles :: (Eq a, ForthType a) => [String] -> ForthStep w a
+loadFiles :: (Eq a, ForthType a) => [String] -> ForthStep w a m
 loadFiles nm = do
   trace 0 ("LOAD-FILES: " ++ intercalate "," nm)
   mapM_ fwIncluded' nm

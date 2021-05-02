@@ -57,6 +57,7 @@ library
     Rational
 
   build-depends:
+    , array
     , containers
     , directory
     , hashable
@@ -68,6 +69,17 @@ executable h-forth
   import:         common-options
   hs-source-dirs: app
   main-is:        h-forth.hs
+  build-depends:
+    , containers
+    , hforth
+    , optparse-applicative
+    , filepath
+  ghc-options:    -threaded -rtsopts -with-rtsopts=-N
+
+executable buzzard
+  import:         common-options
+  hs-source-dirs: app
+  main-is:        buzzard.hs
   build-depends:
     , containers
     , hforth
