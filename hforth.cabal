@@ -70,10 +70,8 @@ executable h-forth
   hs-source-dirs: app
   main-is:        h-forth.hs
   build-depends:
-    , containers
     , hforth
     , optparse-applicative
-    , filepath
   ghc-options:    -threaded -rtsopts -with-rtsopts=-N
 
 executable buzzard
@@ -81,10 +79,8 @@ executable buzzard
   hs-source-dirs: app
   main-is:        buzzard.hs
   build-depends:
-    , containers
     , hforth
-    , optparse-applicative
-    , filepath
+    , containers
   ghc-options:    -threaded -rtsopts -with-rtsopts=-N
 
 executable rat-forth
@@ -92,8 +88,8 @@ executable rat-forth
   hs-source-dirs: app
   main-is:        rat-forth.hs
   build-depends:
-    , containers
     , hforth
+    , containers
   ghc-options:    -threaded -rtsopts -with-rtsopts=-N
 
 test-suite hforth-test

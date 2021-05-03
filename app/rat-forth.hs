@@ -18,7 +18,7 @@ import           HForth                         ( Continue
                                                 , pop
                                                 , push
                                                 , repl
-                                                , VMMemory (..)
+                                                
                                                 )
 import           Rational                       ( parseRat
                                                 , ratPp

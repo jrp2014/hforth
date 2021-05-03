@@ -13,7 +13,7 @@ import           HForth                         ( Dict
                                                 , fwUndefined
                                                 , loadFiles
                                                 , repl
-                                                , VMMemory (..)
+                                                
                                                 )
 import           Options.Applicative            ( (<**>)
                                                 , ParserInfo
@@ -93,7 +93,7 @@ main = do
         , inputPort = Just stdin
         , tracing   = tracelevel opts
         , recursive = if allowRecursive opts then fwUndefined else Nothing
-        , vMMemory = Just $ replicate 1000 0
+        , memory = Just $ replicate 1000 0
         }
       initF = loadFiles args
   repl vm initF

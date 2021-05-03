@@ -2,9 +2,9 @@
 {-# LANGUAGE FlexibleContexts   #-}
 {-# LANGUAGE LambdaCase         #-}
 {-# LANGUAGE StrictData         #-}
-{-# LANGUAGE MultiParamTypeClasses         #-}
-{-# LANGUAGE FlexibleInstances         #-}
-{-# LANGUAGE AllowAmbiguousTypes         #-}
+{-# LANGUAGE MultiParamTypeClasses  #-}
+{-# LANGUAGE FlexibleInstances      #-}
+{-# LANGUAGE AllowAmbiguousTypes    #-}
 module HForth where
 
 import           Control.Concurrent             ( MVar
@@ -26,7 +26,7 @@ import           Control.Monad.State            ( MonadIO(liftIO)
                                                 , StateT(runStateT)
                                                 , modify
                                                 )
-import           Data.Array
+import Data.Array ( Array, listArray, bounds, (!), (//) )
 import           Data.Char                      ( isSpace
                                                 , toLower
                                                 )
@@ -81,7 +81,7 @@ instance ForthType a => Show (DC a) where
     DCXT     str -> "XT:" ++ str
 
 -- | Extract plain value from 'DC', else error.
-dcPlain :: DC a -> Forth w a m  a
+dcPlain :: DC a -> Forth w a m a
 dcPlain dc = case dc of
   DC a -> return a
   _    -> throwError "DC-NOT-VALUE-CELL"
@@ -96,21 +96,26 @@ ccIsWord w cw = case cw of
   _         -> False
 
 -- | Int-indexed memory, type constructor @m@, index type @i@, and elememt type @e@
-class Memory m e where
+class ForthType e => ForthMemory m e where
   fetch :: ForthType i => m e -> i -> e
   store :: ForthType i => m e -> i -> e -> m e
+  reset :: m e -> m e
 
-instance Memory [] e where
+instance ForthType e => ForthMemory [] e where
   fetch mem ix = mem !! tyToInt' "FETCH" ix
   store mem ix e = take ix' mem ++ e : drop (ix' + 1) mem
     where ix' = tyToInt' "STORE" ix
+  reset mem = replicate (length mem) (tyFromInt 0)
 
-instance Memory (Array Int) e where
-  fetch mem ix = mem ! tyToInt' "FETCH" ix -- TODO should have a tyToIx
+instance ForthType e => ForthMemory (Array Int) e where
+  fetch mem ix = mem ! tyToInt' "FETCH" ix
   store mem ix e = mem // [(tyToInt' "STORE" ix, e)]
+  reset mem = listArray bds (replicate (hi - lo + 1) (tyFromInt 0))
+    where bds@(lo, hi) = bounds mem
+
+-- .. @vector@ etc
 
 type VMMemory m e = m e
-
 
 -- | The machine is either interpreting or compiling.
 data VMMode = Interpret | Compile deriving stock (Eq,Show)
@@ -132,10 +137,10 @@ data VM w a m = VM
   , inputPort :: Maybe Handle -- ^ eg, @Just stdin@
   , tracing   :: Int -- ^ for debugging
   , sigint    :: MVar Bool -- ^ True if a SIGINT signal (user interrupt) has been received.
-  , vMMemory  :: Maybe (VMMemory m a)
+  , memory    :: Maybe (VMMemory m a) -- ^ a C-style array syle container
   }
 
-instance (ForthType a) => Show (VM w a m) where
+instance (ForthType a, Show (VMMemory m a)) => Show (VM w a m) where
   show vm = concat
     [ "\n DATA STACK: "
     , unwords (map show (reverse $ stack vm))
@@ -160,7 +165,7 @@ instance (ForthType a) => Show (VM w a m) where
     , "\n TRACING: "
     , show (tracing vm)
     , "\n MEMORY: "
-    , maybe "NO" (const "YES") (vMMemory vm)
+    , maybe "NO" show (memory vm)
     ]
 
 -- | Signals (exceptions) from 'VM'.
@@ -172,7 +177,7 @@ type Forth w a m r = CME.ExceptT VMSignal (StateT (VM w a m) IO) r
 data Continue = Next | Exit deriving stock Show
 
 -- | The result of intpreting an instruction: Left = exit, Right () = continue
-type ForthStep w a m  = Forth w a m Continue
+type ForthStep w a m = Forth w a m Continue
 
 next :: ForthStep w a m
 next = return Next
@@ -196,18 +201,18 @@ emptyVm w lit sig = VM { stack     = []
                        , inputPort = Nothing
                        , tracing   = -1
                        , sigint    = sig
-                       , vMMemory  = Nothing
+                       , memory    = Nothing
                        }
 
 -- | Reset 'VM', on error.
-vmReset :: VM w a m  -> VM w a m
+vmReset :: ForthMemory m a => VM w a m -> VM w a m
 vmReset vm = vm { stack  = []
                 , rstack = []
                 , cstack = []
                 , buffer = ""
                 , mode   = Interpret
                 , locals = []
-                , vMMemory = error "Memory reset unimplemented"
+                , memory = fmap reset (memory vm)
                 }
 
 -- | Type specialised variant of 'get' that checks SIGINT handler.
@@ -277,7 +282,10 @@ pushc x = do
 
 -- | Pop indicated 'VM' stack.
 popVmStack
-  :: String -> (VM w a m -> [r]) -> (VM w a m -> [r] -> VM w a m) -> Forth w a m r
+  :: String
+  -> (VM w a m -> [r])
+  -> (VM w a m -> [r] -> VM w a m)
+  -> Forth w a m r
 popVmStack nm f g = do
   vm <- getVm
   case f vm of
@@ -504,15 +512,10 @@ vmExecuteBuffer vm = do
   (r, vm') <- runStateT (CME.runExceptT vmExecute) vm
   case r of
     Left err -> case err of
-      VMNoInput   -> return vm'
-      VMEOF       -> die "VMEXECUTEBUFFER: VMEOF"
-      VMError msg -> die
-        (  "VMEXECUTEBUFFER: "
-        ++ msg
-        ++ " before '"
-        ++ buffer vm'
-        ++ "'"
-        )
+      VMNoInput -> return vm'
+      VMEOF     -> die "VMEXECUTEBUFFER: VMEOF"
+      VMError msg ->
+        die ("VMEXECUTEBUFFER: " ++ msg ++ " before '" ++ buffer vm' ++ "'")
     Right Next -> vmExecuteBuffer vm'
     Right Exit -> vmExecuteBuffer vm' -- TODO don't stop buffer execution?
 
@@ -570,7 +573,9 @@ fwQExit = interpretIf (fwExit, next)
 
 -- | Consult stack and select either /true/ or /false/.
 interpretIf
-  :: (Eq a, ForthType a) => (ForthStep w a m, ForthStep w a m) -> ForthStep w a m
+  :: (Eq a, ForthType a)
+  => (ForthStep w a m, ForthStep w a m)
+  -> ForthStep w a m
 interpretIf (t, f) = pop >>= \x -> do
   trace 3 ("INTERPRETIF: " ++ tyShow x)
   if x /= tyFromBool False then t else f
@@ -834,7 +839,7 @@ pushStr str =
         )
   in  withVm f
 
-fwVmStat :: ForthType a => ForthStep w a m
+fwVmStat :: (ForthType a, Show (VMMemory m a)) => ForthStep w a m
 fwVmStat = getVm >>= writeLn . show
 
 fwFork :: ForthType a => ForthStep w a m
@@ -887,28 +892,29 @@ fwPause :: (ForthType a) => ForthStep w a m
 fwPause = popInt "PAUSE" >>= pauseThread >> next
   where pauseThread n = when (n > 0) (liftIO (threadDelay (n * 1000000)))
 
-fwFetch :: (ForthType a, Memory m a)  => ForthStep w a m
+fwFetch :: ForthMemory m a => ForthStep w a m
 fwFetch = do
-  vm <- getVm
+  vm   <- getVm
   addr <- popInt "FWFETCH"
-  let mem = fromMaybe (error "NO MEMORY FROM WHICH TO FETCH")
-  push (fetch (mem (vMMemory vm)) addr)
+  case memory vm of
+    Nothing  -> throwError "NO MEMORY FROM WHICH TO FETCH"
+    Just mem -> push (fetch mem addr)
 
-fwStore :: (ForthType a, Memory m a) => ForthStep w a m
+fwStore :: ForthMemory m a => ForthStep w a m
 fwStore = do
-  addr <- popInt "FWSTOR ADDRESS"
+  addr  <- popInt "FWSTOR ADDRESS"
   value <- pop
-  let mem = fromMaybe (error "NO MEMORY TO WHICH TO STORE")
-  let f vm =
-        ( vm {vMMemory = Just $ store (mem (vMMemory vm)) addr value},
-          Next
-        )
-   in withVm f
+  vmm   <- memory <$> getVm
+  case vmm of
+    Nothing -> throwError "NO MEMORY TO WHICH TO STORE"
+    Just mem ->
+      let f vm = (vm { memory = Just $ store mem addr value }, Next)
+      in  withVm f
 
 
 -- * Dictionaries
 
-coreDict :: (Ord a, Num a, ForthType a, Memory m a) => Dict w a m
+coreDict :: (Ord a, Num a, ForthMemory m a, Show (VMMemory m a)) => Dict w a m
 coreDict =
   let err nm =
         throwError (tickQuotes nm ++ ": compiler word in interpeter context")
@@ -978,7 +984,7 @@ coreDict =
       ]
 
 coreWords :: [String]
-coreWords = M.keys (coreDict ::  Dict w Integer [])
+coreWords = M.keys (coreDict :: Dict w Integer [])
 
 isReservedWord :: String -> Bool
 isReservedWord nm = nm `elem` coreWords
@@ -995,7 +1001,7 @@ execErr vm fw = do
 
 -- | Read, evaluate, print, loop.  Prints @OK@ at end of line.  Prints
 -- error message and runs 'vmReset' on error.
-repl' :: (Eq a, ForthType a) => VM w a m -> IO ()
+repl' :: (Eq a, ForthMemory m a) => VM w a m -> IO ()
 repl' vm = do
   (r, vm') <- runStateT (CME.runExceptT vmExecute) vm
   case r of
@@ -1014,7 +1020,7 @@ catchSigint vm = do
   return ()
 
 -- | 'repl'' but with 'catchSigint'.
-repl :: (ForthType a, Eq a) => VM w a m -> ForthStep w a m -> IO ()
+repl :: (Eq a, ForthMemory m a) => VM w a m -> ForthStep w a m -> IO ()
 repl vm initF = do
   catchSigint vm
   (r, vm') <- runStateT (CME.runExceptT initF) vm
