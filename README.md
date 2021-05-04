@@ -60,13 +60,17 @@ Available options:
 primitive words.
 
 To run the tutorial, you need a couple of files defining additional words.
-
 ```sh
 > cabal run rat-forth  --  fs/stdlib.fs  fs/ratlib.fs fs/tutorial.fs
 ```
 
 A further example is
-
 ```sh
 > cabal run rat-forth -- fs/preForth-rts.pre fs/preForth-i386-backend.pre fs/preForth.pre
 ```
+
+And some examples from [buzzard.2](https://www.ioccc.org/years.html#1992)
+```sh
+> cabal run buzzard fs/buzzard/third fs/buzzard/demo5.th
+```
+
