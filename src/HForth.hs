@@ -26,7 +26,12 @@ import           Control.Monad.State            ( MonadIO(liftIO)
                                                 , StateT(runStateT)
                                                 , modify
                                                 )
-import Data.Array ( Array, listArray, bounds, (!), (//) )
+import           Data.Array                     ( (!)
+                                                , (//)
+                                                , Array
+                                                , bounds
+                                                , listArray
+                                                )
 import           Data.Char                      ( isSpace
                                                 , toLower
                                                 )
@@ -80,6 +85,14 @@ instance ForthType a => Show (DC a) where
     DCString str -> "STRING:" ++ tickQuotes str
     DCXT     str -> "XT:" ++ str
 
+instance ForthType a => ForthType (DC a) where
+  tyShow = show
+  tyToInt dc = case dc of
+    DC a -> tyToInt a
+    _    -> Nothing
+  tyFromInt = DC . tyFromInt
+  tyFromBool t = DC . tyFromInt $ if t then -1 else 0
+
 -- | Extract plain value from 'DC', else error.
 dcPlain :: DC a -> Forth w a m a
 dcPlain dc = case dc of
@@ -100,18 +113,28 @@ class ForthType e => ForthMemory m e where
   fetch :: ForthType i => m e -> i -> e
   store :: ForthType i => m e -> i -> e -> m e
   reset :: m e -> m e
+  display :: m e -> String
 
 instance ForthType e => ForthMemory [] e where
   fetch mem ix = mem !! tyToInt' "FETCH" ix
   store mem ix e = take ix' mem ++ e : drop (ix' + 1) mem
     where ix' = tyToInt' "STORE" ix
   reset mem = replicate (length mem) (tyFromInt 0)
+  display = unwords . map tyShow
 
 instance ForthType e => ForthMemory (Array Int) e where
   fetch mem ix = mem ! tyToInt' "FETCH" ix
   store mem ix e = mem // [(tyToInt' "STORE" ix, e)]
   reset mem = listArray bds (replicate (hi - lo + 1) (tyFromInt 0))
     where bds@(lo, hi) = bounds mem
+  display mem = show (tyShow <$> mem)
+
+instance ForthType e => ForthMemory [] (DC e)  where
+  fetch mem ix = mem !! tyToInt' "FETCH" ix
+  store mem ix e = take ix' mem ++ e : drop (ix' + 1) mem
+    where ix' = tyToInt' "STORE" ix
+  reset mem = replicate (length mem) (tyFromInt 0)
+  display = unwords . map tyShow
 
 -- .. @vector@ etc
 
@@ -140,7 +163,7 @@ data VM w a m = VM
   , memory    :: Maybe (VMMemory m a) -- ^ a C-style array syle container
   }
 
-instance (ForthType a, Show (VMMemory m a)) => Show (VM w a m) where
+instance (ForthType a, ForthMemory m a) => Show (VM w a m) where
   show vm = concat
     [ "\n DATA STACK: "
     , unwords (map show (reverse $ stack vm))
@@ -165,7 +188,7 @@ instance (ForthType a, Show (VMMemory m a)) => Show (VM w a m) where
     , "\n TRACING: "
     , show (tracing vm)
     , "\n MEMORY: "
-    , maybe "NO" show (memory vm)
+    , maybe "NO" display (memory vm)
     ]
 
 -- | Signals (exceptions) from 'VM'.
@@ -512,10 +535,18 @@ vmExecuteBuffer vm = do
   (r, vm') <- runStateT (CME.runExceptT vmExecute) vm
   case r of
     Left err -> case err of
-      VMNoInput -> return vm'
-      VMEOF     -> die "VMEXECUTEBUFFER: VMEOF"
-      VMError msg ->
-        die ("VMEXECUTEBUFFER: " ++ msg ++ " before '" ++ buffer vm' ++ "'")
+      VMNoInput   -> return vm'
+      VMEOF       -> die "VMEXECUTEBUFFER: VMEOF"
+      VMError msg -> die
+        (  "VMEXECUTEBUFFER: "
+        ++ msg
+        ++ " before '"
+        ++ (if length (buffer vm') > 80
+             then take 80 (buffer vm') ++ "..."
+             else buffer vm'
+           )
+        ++ "'"
+        )
     Right Next -> vmExecuteBuffer vm'
     Right Exit -> vmExecuteBuffer vm' -- TODO don't stop buffer execution?
 
@@ -826,7 +857,7 @@ fwDotS = do
   vm <- getVm
   let l = map show (reverse (stack vm))
       n = "<" ++ show (length l) ++ "> "
-  write (n ++ concatMap (++ " ") l)
+  write (n ++ unwords l)
 
 fwBye :: ForthStep w a m
 fwBye = liftIO exitSuccess
@@ -839,7 +870,7 @@ pushStr str =
         )
   in  withVm f
 
-fwVmStat :: (ForthType a, Show (VMMemory m a)) => ForthStep w a m
+fwVmStat :: (ForthMemory m a) => ForthStep w a m
 fwVmStat = getVm >>= writeLn . show
 
 fwFork :: ForthType a => ForthStep w a m
@@ -898,13 +929,16 @@ fwFetch = do
   addr <- popInt "FWFETCH"
   case memory vm of
     Nothing  -> throwError "NO MEMORY FROM WHICH TO FETCH"
-    Just mem -> push (fetch mem addr)
+    Just mem -> do
+      trace 3 ("FWFETCH from " ++ show addr)
+      push (fetch mem addr)
 
-fwStore :: ForthMemory m a => ForthStep w a m
+fwStore :: (ForthMemory m a) => ForthStep w a m
 fwStore = do
   addr  <- popInt "FWSTOR ADDRESS"
   value <- pop
   vmm   <- memory <$> getVm
+  trace 3 ("FWSTORE " ++ tyShow value ++ " at " ++ show addr)
   case vmm of
     Nothing -> throwError "NO MEMORY TO WHICH TO STORE"
     Just mem ->
@@ -914,7 +948,7 @@ fwStore = do
 
 -- * Dictionaries
 
-coreDict :: (Ord a, Num a, ForthMemory m a, Show (VMMemory m a)) => Dict w a m
+coreDict :: (Ord a, Num a, ForthMemory m a) => Dict w a m
 coreDict =
   let err nm =
         throwError (tickQuotes nm ++ ": compiler word in interpeter context")

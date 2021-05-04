@@ -57,6 +57,9 @@ fwDivMod = pop >>= \p -> pop >>= \q ->
   let (r, s) = floor q `divMod` floor p
   in  push (fromInteger s) >> push (fromInteger r)
 
+
+
+
 ratDict :: Dict w Rational m
 ratDict = M.fromList
   [ ("+"        , binaryOp (+))
@@ -64,11 +67,11 @@ ratDict = M.fromList
   ,
       --  , ("-"      , binaryOp (-)) -- already included in coreDict
       -- FRACTIONAL
-    ("/"        , binaryOp (/))
-  ,
+--    ("/"        , binaryOp (/))
+--  ,
       -- INTEGRAL
-    ("mod"      , binaryOp' mod)
-  , ("div"      , binaryOp' div)
+--    ("mod"      , binaryOp' mod)
+    ("/"      , binaryOp' div)
   , ("div-mod"  , fwDivMod)
   ,
       -- EQ
@@ -99,7 +102,7 @@ main = do
                                      , inputPort = Just stdin
                                      , tracing   = 1
                                      , recursive = fwUndefined
-                                     , memory    = Just $ replicate 1000 0
+                                     , memory    = Just $ replicate 1000 ( tyFromInt 0)
                                      }
       initF = loadFiles args -- loadFiles ["stdlib.fs", "ratlib.fs"]
   putStrLn "BUZZARD"

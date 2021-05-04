@@ -1,13 +1,13 @@
 \ : immediate _read @ ! - * / <0 exit echo key _pick
 
-: debug 1 5 ! ;
+: debug immediate 1 5 ! ;
 
 : r 1 ;
 
 : ] r @ 1 - r ! _read ] ;
 
-: _main r @ 7 ! ] ;
-_main
+: _main immediate r @ 7 ! ] ;
+\ _main
 
 
 : _x 3 @ ;
@@ -16,41 +16,41 @@ _main
 : _y! 4 ! ;
 
 
-: swap _x! _y! _x _y ;
+: bswap _x! _y! _x _y ;
 
-: + 0 swap - - ;
+: + 0 bswap - - ;
 
-: dup _x! _x _x ;
+: bdup _x! _x _x ;
 
-: inc dup @ 1 + swap ! ;
+: inc bdup @ 1 + bswap ! ;
 
 : h 0 ;
 
 : , h @ ! h inc ;
 
 
-: ' r @ @ dup 1 + r @ ! @ ;
+: b' r @ @ bdup 1 + r @ ! @ ;
 
-: ; immediate ' exit , ;
+\ : ; immediate b' exit , ;
 
 
-: drop 0 * + ;
+: bdrop 0 * + ;
 
-: dec dup @ 1 - swap ! ;
+: dec bdup @ 1 - bswap ! ;
 
-: tor r @ @ swap r @ ! r @ 1 + r ! r @ ! ;
+: tor r @ @ bswap r @ ! r @ 1 + r ! r @ ! ;
 
-: fromr r @ @ r @ 1 - r ! r @ @ swap r @ ! ;
+: fromr r @ @ r @ 1 - r ! r @ @ bswap r @ ! ;
 
-: tail fromr fromr drop tor ;
+: tail fromr fromr bdrop tor ;
 
-: minus 0 swap - ;
+: minus 0 bswap - ;
 
-: bnot 1 swap - ;
+: bnot 1 bswap - ;
 
 : < - <0 ;
 
-: logical dup 0 < swap minus 0 < + ;
+: logical bdup 0 < bswap minus 0 < + ;
 
 : not logical bnot ;
 
@@ -70,41 +70,41 @@ _main
 
 : here h @ ;
 
-: if immediate ' notbranch , here 0 , ;
+: bif immediate b' notbranch , here 0 , ;
 
-: then immediate dup here swap - swap ! ;
+: bthen immediate bdup here bswap - bswap ! ;
 
 : ')' 0 ;
 
-: _fix key drop key swap 2 + ! ;
+: _fix key bdrop key bswap 2 + ! ;
 
-: fix-')' immediate ' ')' _fix ;
+: fix-')' immediate b' ')' _fix ;
 
-fix-')' )
+\ fix-')' )
 
-: find-) key ')' = not if tail find-) then ;
+: find-) key ')' = not bif tail find-) bthen ;
 
-: ( immediate find-) ;
+\ : ( immediate find-) ;
 
 ( we should be able to do FORTH-style comments now )
 
 ( this works as follows: ( is an immediate word, so it gets
   control during compilation.  Then it simply reads in characters
   until it sees a close parenthesis.  once it does, it exits.
-  if not, it pops off the return stack--manual tail recursion. )
+  bif not, it pops off the return stack--manual tail recursion. )
 
 ( now that we've got comments, we can comment the rest of the code! )
 
-: else immediate
-  ' branch ,		( compile a definite branch )
+: belse immediate
+  b' branch ,		( compile a definite branch )
   here			( push the backpatching address )
   0 ,			( compile a dummy offset for branch )
-  swap			( bring old backpatch address to top )
-  dup here swap -	( calculate the offset from old address )
-  swap !		( put the address on top and store it )
+  bswap			( bring old backpatch address to top )
+  bdup here bswap -	( calculate the offset from old address )
+  bswap !		( put the address on top and store it )
 ;
 
-: over _x! _y! _y _x _y ;
+: bover _x! _y! _y _x _y ;
 
 : add
   _x!			( save the pointer in a temp variable )
@@ -123,61 +123,61 @@ fix-')' )
   r @ !		( store it to our return address and return )
 ;
 
-: mod _x! _y!		( get x then y off of stack )
+: mod _x! _y!		( get x bthen y off of stack )
   _y
   _y _x / _x *		( y - y / x * x )
   -
 ;
 
 : '\n' 0 ;
-: '"' 0 ;
-: '0' 0 ;
+: b'"' 0 ;
+: b'0' 0 ;
 : 'space' 0 ;
 
-: fix-'\n' immediate ' '\n' _fix ;
-: fix-'"' immediate ' '"' _fix ;
-: fix-'0' immediate ' '0' _fix ;
-: fix-'space' immediate ' 'space' _fix ;
+: fix-'\n' immediate b' '\n' _fix ;
+: fix-'"' immediate b' b'"' _fix ;
+: fix-'0' immediate b' b'0' _fix ;
+: fix-'space' immediate b' 'space' _fix ;
 
-fix-'0' 0 fix-'space'  fix-'"' "
-fix-'\n'
+\ fix-'0' 0 fix-'space'  fix-'"' '"'
+\ fix-'\n'
 
 
-: cr '\n' echo exit
+: cr '\n' echo ;
 
 : printnum
-  dup
+  bdup
   10 mod '0' +
-  swap 10 / dup
-  if
+  bswap 10 / bdup
+  bif
     printnum 0
-  then
-  drop echo
+  bthen
+  bdrop echo
 ;
 
-: .
-  dup 0 <
-  if
+: b.
+  bdup 0 <
+  bif
     45 echo minus
-  then
+  bthen
   printnum
   'space' echo
 ;
 
 
-: debugprint dup . cr ;
+: debugprint bdup b. cr ;
 
 ( the following routine takes a pointer to a string, and prints it,
   except for the trailing quote.  returns a pointer to the next word
   after the trailing quote )
 
 : _print
-  dup 1 +
-  swap @
-  dup '"' =
-  if
-    drop exit
-  then
+  bdup 1 +
+  bswap @
+  bdup '"' =
+  bif
+    bdrop exit
+  bthen
   echo
   tail _print
 ;
@@ -192,176 +192,176 @@ fix-'\n'
 ;
 
 : find-"
-  key dup ,
+  key bdup ,
   '"' =
-  if
+  bif
     exit
-  then
+  bthen
   tail find-"
 ;
 
 : " immediate
-  key drop
-  ' immprint ,
+  key bdrop
+  b' immprint ,
   find-"
 ;
 
-: do immediate
-  ' swap ,		( compile 'swap' to swap the limit and start )
-  ' tor ,		( compile to push the limit onto the return stack )
-  ' tor ,		( compile to push the start on the return stack )
+: bdo immediate
+  b' bswap ,		( compile 'bswap' to bswap the limit and start )
+  b' tor ,		( compile to push the limit onto the return stack )
+  b' tor ,		( compile to push the start on the return stack )
   here			( save this address so we can branch back to it )
 ;
 
-: i r @ 1 - @ ;
-: j r @ 3 - @ ;
+: bi r @ 1 - @ ;
+: bj r @ 3 - @ ;
 
-: > swap < ;
+: > bswap < ;
 : <= 1 + < ;
-: >= swap <= ;
+: >= bswap <= ;
 
 : inci 
-  r @ 1 - 	( get the pointer to i )
+  r @ 1 - 	( get the pointer to bi )
   inc		( add one to it )
   r @ 1 - @ 	( find the value again )
   r @ 2 - @	( find the limit value )
   <
-  if
+  bif
     r @ @ @ r @ @ + r @ ! exit		( branch )
-  then
+  bthen
   fromr 1 +
-  fromr drop
-  fromr drop
+  fromr bdrop
+  fromr bdrop
   tor
 ;
   	
-: loop immediate ' inci , here - , ;
+: bloop immediate b' inci , here - , ;
 
 : loopexit
 
-  fromr drop		( pop off our return address )
-  fromr drop		( pop off i )
-  fromr drop		( pop off the limit of i )
+  fromr bdrop		( pop off our return address )
+  fromr bdrop		( pop off bi )
+  fromr bdrop		( pop off the limit of bi )
 ;			( and return to the caller's caller routine )
 
 : isprime
-  dup 2 = if
+  bdup 2 = bif
     exit
-  then
-  dup 2 / 2		( loop from 2 to n/2 )
-  do
-    dup			( value we're checking if it's prime )
-    i mod		( mod it by divisor )
-    not if
-      drop 0 loopexit	( exit from routine from inside loop )
-    then
-  loop 
+  bthen
+  bdup 2 / 2		( bloop from 2 to n/2 )
+  bdo
+    bdup			( value we're checking bif it's prime )
+    bi mod		( mod it by divisor )
+    not bif
+      bdrop 0 loopexit	( exit from routine from inside bloop )
+    bthen
+  bloop 
 ;
 
 : primes
-  " The primes from "
-  dup .
-  "  to "
-  over .
-  "  are:"
+  s" The primes from "
+  bdup .
+  s"  to "
+  bover .
+  s"  are:"
   cr
 
-  do
-    i isprime 
-    if
-      i . 'space' echo
-    then
-  loop
+  bdo
+    bi isprime 
+    bif
+      bi b. 'space' echo
+    bthen
+  bloop
   cr
 ;
 
-: execute
+: bexecute
   8 !
-  ' exit 9 !
+  b' exit 9 !
   8 tor
 ;
 
 : :: ;		( :: is going to be a word that does ':' at runtime )
 
-: fix-:: immediate 3 ' :: ! ;
+: fix-:: immediate 3 b' :: ! ;
 fix-::
 
 	( Override old definition of ':' with a new one that invokes ] )
-: : immediate :: ] ;
+\ : : immediate :: ] ;
 
 : command
   here 5 !		( store dict pointer in temp variable )
   _read			( compile a word )
-			( if we get control back: )
+			( bif we get control back: )
   here 5 @
-  = if
+  = bif
     tail command	( we didn't compile anything )
-  then
+  bthen
   here 1 - h !		( decrement the dictionary pointer )
   here 5 @		( get the original value )
-  = if
+  = bif
     here @		( get the word that was compiled )
-    execute		( and run it )
-  else
-    here @		( else it was an integer constant, so push it )
+    bexecute		( and run it )
+  belse
+    here @		( belse it was an integer constant, so push it )
     here 1 - h !	( and decrement the dictionary pointer again )
-  then
+  bthen
   tail command
 ;
 
 : make-immediate	( make a word just compiled immediate )
   here 1 -		( back up a word in the dictionary )
-  dup dup		( save the pointer to here )
+  bdup bdup		( save the pointer to here )
   h !			( store as the current dictionary pointer )
   @			( get the run-time code pointer )
-  swap			( get the dict pointer again )
+  bswap			( get the dict pointer again )
   1 -			( point to the compile-time code pointer )
   !			( write run-time code pointer on compile-time pointer )
 ;
 
 : <build immediate
   make-immediate	( make the word compiled so far immediate )
-  ' :: ,		( compile '::', so we read next word )
+  b' :: ,		( compile '::', so we read next word )
   2 ,			( compile 'pushint' )
   here 0 ,		( write out a 0 but save address for does> )
-  ' , ,			( compile a push that address onto dictionary )
+  b' , ,			( compile a push that address onto dictionary )
 ;
 
 : does> immediate
-  ' command ,		( jump back into command mode at runtime )
-  here swap !		( backpatch the build> to point to here )
+  b' command ,		( jump back into command mode at runtime )
+  here bswap !		( backpatch the build> to point to here )
   2 ,			( compile run-code primitive so we look like a word )
-  ' fromr ,		( compile fromr, which leaves var address on stack )
+  b' fromr ,		( compile fromr, which leaves var address on stack )
 ;
 
 
 : _dump			( dump out the definition of a word, sort of )
-  dup " (" . " , "
-  dup @			( save the pointer and get the contents )
-  dup ' exit
-  = if
-	" ;)" cr exit
-  then
-  . " ), "
+  bdup s" (" b. s" , "
+  bdup @			( save the pointer and get the contents )
+  bdup b' exit
+  = bif
+	s" ;)" cr exit
+  bthen
+  b. s" ), "
   1 +
   tail _dump
 ;
 
 : dump _dump ;
 
-: # . cr ;
+: # b. cr ;
   
 : var <build , does> ;
 : constant <build , does> @ ;
 : array <build allot does> + ;
 
 : [ immediate command ;
-: _welcome " Welcome to THIRD.
+: _welcome s" Welcome to THIRD.
 Ok.
 " ;
 
-: ; immediate ' exit , command exit
+\ : ; immediate b' exit , command exit
 
-[
+\ [
 
 _welcome
