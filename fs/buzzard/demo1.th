@@ -1,4 +1,4 @@
 : demo1 s" Hello world!
 " ;
 
-demo1
+demo1 . .

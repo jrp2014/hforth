@@ -23,8 +23,8 @@
 ;
 
 : demo4
-  s" 4 factorial is: " 4 fact .s cr
-  s" 6 factorial is: " 6 fact .s cr
+  s" 4 factorial is:" drop 4 fact cr      \ drop the string length
+  s" 6 factorial is:" drop 6 fact cr .s
 ;
 
 demo4

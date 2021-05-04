@@ -1,12 +1,15 @@
+\ Version for hforth, removing built in hforth primitives and
+\ those that use _read, which replies on a specific memory layout
+
 \ : immediate _read @ ! - * / <0 exit echo key _pick
 
-: debug immediate 1 5 ! ;
+\ : debug immediate 1 5 ! exit
 
 : r 1 ;
 
-: ] r @ 1 - r ! _read ] ;
+\ : ] r @ 1 - r ! _read ]
 
-: _main immediate r @ 7 ! ] ;
+\ : _main immediate r @ 7 ! ]
 \ _main
 
 
@@ -16,45 +19,45 @@
 : _y! 4 ! ;
 
 
-: bswap _x! _y! _x _y ;
+\ : swap _x! _y! _x _y exit
 
-: + 0 bswap - - ;
+\ : + 0 swap - - ;
 
-: bdup _x! _x _x ;
+\ : dup _x! _x _x ;
 
-: inc bdup @ 1 + bswap ! ;
+: inc dup @ 1 + swap ! ;
 
 : h 0 ;
 
 : , h @ ! h inc ;
 
 
-: b' r @ @ bdup 1 + r @ ! @ ;
+\ : ' r @ @ dup 1 + r @ ! @ exit
 
-\ : ; immediate b' exit , ;
+\ : ; immediate ' exit , exit
 
 
-: bdrop 0 * + ;
+\ : drop 0 * + ;
 
-: dec bdup @ 1 - bswap ! ;
+: dec dup @ 1 - swap ! ;
 
-: tor r @ @ bswap r @ ! r @ 1 + r ! r @ ! ;
+: tor r @ @ swap r @ ! r @ 1 + r ! r @ ! ;
 
-: fromr r @ @ r @ 1 - r ! r @ @ bswap r @ ! ;
+: fromr r @ @ r @ 1 - r ! r @ @ swap r @ ! ;
 
-: tail fromr fromr bdrop tor ;
+: tail fromr fromr drop tor ;
 
-: minus 0 bswap - ;
+: minus 0 swap - ;
 
-: bnot 1 bswap - ;
+: bnot 1 swap - ;
 
 : < - <0 ;
 
-: logical bdup 0 < bswap minus 0 < + ;
+: logical dup 0 < swap minus 0 < + ;
 
 : not logical bnot ;
 
-: = - not ;
+\ : = - not ;
 
 : branch r @ @ @ r @ @ + r @ ! ;
 
@@ -70,19 +73,19 @@
 
 : here h @ ;
 
-: bif immediate b' notbranch , here 0 , ;
+\ : if immediate ' notbranch , here 0 , ;
 
-: bthen immediate bdup here bswap - bswap ! ;
+\ : then immediate dup here swap - swap ! ;
 
-: ')' 0 ;
+: b')' 0 ;
 
-: _fix key bdrop key bswap 2 + ! ;
+: _fix key drop key swap 2 + ! ;
 
-: fix-')' immediate b' ')' _fix ;
+: fix-')' immediate ' b')' _fix ;
 
 \ fix-')' )
 
-: find-) key ')' = not bif tail find-) bthen ;
+: find-) key ')' = not if tail find-) then ;
 
 \ : ( immediate find-) ;
 
@@ -91,20 +94,20 @@
 ( this works as follows: ( is an immediate word, so it gets
   control during compilation.  Then it simply reads in characters
   until it sees a close parenthesis.  once it does, it exits.
-  bif not, it pops off the return stack--manual tail recursion. )
+  if not, it pops off the return stack--manual tail recursion. )
 
 ( now that we've got comments, we can comment the rest of the code! )
 
-: belse immediate
-  b' branch ,		( compile a definite branch )
-  here			( push the backpatching address )
-  0 ,			( compile a dummy offset for branch )
-  bswap			( bring old backpatch address to top )
-  bdup here bswap -	( calculate the offset from old address )
-  bswap !		( put the address on top and store it )
-;
+\ : else immediate
+\   ' branch ,		( compile a definite branch )
+\   here			( push the backpatching address )
+\   0 ,			( compile a dummy offset for branch )
+\   swap			( bring old backpatch address to top )
+\   dup here swap -	( calculate the offset from old address )
+\   swap !		( put the address on top and store it )
+\ ;
 
-: bover _x! _y! _y _x _y ;
+\ : over _x! _y! _y _x _y ;
 
 : add
   _x!			( save the pointer in a temp variable )
@@ -123,7 +126,7 @@
   r @ !		( store it to our return address and return )
 ;
 
-: mod _x! _y!		( get x bthen y off of stack )
+: mod _x! _y!		( get x then y off of stack )
   _y
   _y _x / _x *		( y - y / x * x )
   -
@@ -134,50 +137,50 @@
 : b'0' 0 ;
 : 'space' 0 ;
 
-: fix-'\n' immediate b' '\n' _fix ;
-: fix-'"' immediate b' b'"' _fix ;
-: fix-'0' immediate b' b'0' _fix ;
-: fix-'space' immediate b' 'space' _fix ;
+: fix-'\n' immediate ' '\n' _fix ;
+: fix-'"' immediate ' b'"' _fix ;
+: fix-'0' immediate ' b'0' _fix ;
+: fix-'space' immediate ' 'space' _fix ;
 
-\ fix-'0' 0 fix-'space'  fix-'"' '"'
+\ fix-'0' 0 fix-'space'  fix-'"' "
 \ fix-'\n'
 
 
 : cr '\n' echo ;
 
 : printnum
-  bdup
+  dup
   10 mod '0' +
-  bswap 10 / bdup
-  bif
+  swap 10 / dup
+  if
     printnum 0
-  bthen
-  bdrop echo
+  then
+  drop echo
 ;
 
-: b.
-  bdup 0 <
-  bif
-    45 echo minus
-  bthen
-  printnum
-  'space' echo
-;
+\ : .
+\   dup 0 <
+\   if
+\     45 echo minus
+\   then
+\   printnum
+\   'space' echo
+\ ;
 
 
-: debugprint bdup b. cr ;
+: debugprint dup . cr ;
 
 ( the following routine takes a pointer to a string, and prints it,
   except for the trailing quote.  returns a pointer to the next word
   after the trailing quote )
 
 : _print
-  bdup 1 +
-  bswap @
-  bdup '"' =
-  bif
-    bdrop exit
-  bthen
+  dup 1 +
+  swap @
+  dup '"' =
+  if
+    drop exit
+  then
   echo
   tail _print
 ;
@@ -192,176 +195,176 @@
 ;
 
 : find-"
-  key bdup ,
+  key dup ,
   '"' =
-  bif
+  if
     exit
-  bthen
+  then
   tail find-"
 ;
 
 : " immediate
-  key bdrop
-  b' immprint ,
+  key drop
+  ' immprint ,
   find-"
 ;
 
-: bdo immediate
-  b' bswap ,		( compile 'bswap' to bswap the limit and start )
-  b' tor ,		( compile to push the limit onto the return stack )
-  b' tor ,		( compile to push the start on the return stack )
-  here			( save this address so we can branch back to it )
-;
+\ : do immediate
+\   ' swap ,		( compile 'swap' to swap the limit and start )
+\   ' tor ,		( compile to push the limit onto the return stack )
+\   ' tor ,		( compile to push the start on the return stack )
+\   here			( save this address so we can branch back to it )
+\ ;
 
-: bi r @ 1 - @ ;
-: bj r @ 3 - @ ;
+\ : i r @ 1 - @ ;
+\ : j r @ 3 - @ ;
 
-: > bswap < ;
-: <= 1 + < ;
-: >= bswap <= ;
+\ : > swap < ;
+\ : <= 1 + < ;
+\ : >= swap <= ;
 
 : inci 
-  r @ 1 - 	( get the pointer to bi )
+  r @ 1 - 	( get the pointer to i )
   inc		( add one to it )
   r @ 1 - @ 	( find the value again )
   r @ 2 - @	( find the limit value )
   <
-  bif
+  if
     r @ @ @ r @ @ + r @ ! exit		( branch )
-  bthen
+  then
   fromr 1 +
-  fromr bdrop
-  fromr bdrop
+  fromr drop
+  fromr drop
   tor
 ;
   	
-: bloop immediate b' inci , here - , ;
+\ : loop immediate ' inci , here - , ;
 
 : loopexit
 
-  fromr bdrop		( pop off our return address )
-  fromr bdrop		( pop off bi )
-  fromr bdrop		( pop off the limit of bi )
+  fromr drop		( pop off our return address )
+  fromr drop		( pop off i )
+  fromr drop		( pop off the limit of i )
 ;			( and return to the caller's caller routine )
 
 : isprime
-  bdup 2 = bif
+  dup 2 = if
     exit
-  bthen
-  bdup 2 / 2		( bloop from 2 to n/2 )
-  bdo
-    bdup			( value we're checking bif it's prime )
-    bi mod		( mod it by divisor )
-    not bif
-      bdrop 0 loopexit	( exit from routine from inside bloop )
-    bthen
-  bloop 
+  then
+  dup 2 / 2		( loop from 2 to n/2 )
+  do
+    dup			( value we're checking if it's prime )
+    i mod		( mod it by divisor )
+    not if
+      drop 0 loopexit	( exit from routine from inside loop )
+    then
+  loop 
 ;
 
 : primes
   s" The primes from "
-  bdup .
+  dup .
   s"  to "
-  bover .
+  over .
   s"  are:"
   cr
 
-  bdo
-    bi isprime 
-    bif
-      bi b. 'space' echo
-    bthen
-  bloop
+  do
+    i isprime 
+    if
+      i . 'space' echo
+    then
+  loop
   cr
 ;
 
-: bexecute
-  8 !
-  b' exit 9 !
-  8 tor
-;
+\ : execute
+\   8 !
+\   ' exit 9 !
+\   8 tor
+\ ;
 
-: :: ;		( :: is going to be a word that does ':' at runtime )
+\ : :: ;		( :: is going to be a word that does ':' at runtime )
 
-: fix-:: immediate 3 b' :: ! ;
-fix-::
+\ : fix-:: immediate 3 ' :: ! ;
+\ fix-::
 
 	( Override old definition of ':' with a new one that invokes ] )
 \ : : immediate :: ] ;
 
-: command
-  here 5 !		( store dict pointer in temp variable )
-  _read			( compile a word )
-			( bif we get control back: )
-  here 5 @
-  = bif
-    tail command	( we didn't compile anything )
-  bthen
-  here 1 - h !		( decrement the dictionary pointer )
-  here 5 @		( get the original value )
-  = bif
-    here @		( get the word that was compiled )
-    bexecute		( and run it )
-  belse
-    here @		( belse it was an integer constant, so push it )
-    here 1 - h !	( and decrement the dictionary pointer again )
-  bthen
-  tail command
-;
+\ : command
+\   here 5 !		( store dict pointer in temp variable )
+\   _read			( compile a word )
+\ 			( if we get control back: )
+\   here 5 @
+\   = if
+\     tail command	( we didn't compile anything )
+\   then
+\   here 1 - h !		( decrement the dictionary pointer )
+\   here 5 @		( get the original value )
+\   = if
+\     here @		( get the word that was compiled )
+\     execute		( and run it )
+\   else
+\     here @		( else it was an integer constant, so push it )
+\     here 1 - h !	( and decrement the dictionary pointer again )
+\   then
+\   tail command
+\ ;
 
-: make-immediate	( make a word just compiled immediate )
-  here 1 -		( back up a word in the dictionary )
-  bdup bdup		( save the pointer to here )
-  h !			( store as the current dictionary pointer )
-  @			( get the run-time code pointer )
-  bswap			( get the dict pointer again )
-  1 -			( point to the compile-time code pointer )
-  !			( write run-time code pointer on compile-time pointer )
-;
+\ : make-immediate	( make a word just compiled immediate )
+\   here 1 -		( back up a word in the dictionary )
+\   dup dup		( save the pointer to here )
+\   h !			( store as the current dictionary pointer )
+\   @			( get the run-time code pointer )
+\   swap			( get the dict pointer again )
+\   1 -			( point to the compile-time code pointer )
+\   !			( write run-time code pointer on compile-time pointer )
+\ ;
 
-: <build immediate
-  make-immediate	( make the word compiled so far immediate )
-  b' :: ,		( compile '::', so we read next word )
-  2 ,			( compile 'pushint' )
-  here 0 ,		( write out a 0 but save address for does> )
-  b' , ,			( compile a push that address onto dictionary )
-;
+\ : <build immediate
+\   make-immediate	( make the word compiled so far immediate )
+\   ' :: ,		( compile '::', so we read next word )
+\   2 ,			( compile 'pushint' )
+\   here 0 ,		( write out a 0 but save address for does> )
+\   ' , ,			( compile a push that address onto dictionary )
+\ ;
 
-: does> immediate
-  b' command ,		( jump back into command mode at runtime )
-  here bswap !		( backpatch the build> to point to here )
-  2 ,			( compile run-code primitive so we look like a word )
-  b' fromr ,		( compile fromr, which leaves var address on stack )
-;
+\ : does> immediate
+\   ' command ,		( jump back into command mode at runtime )
+\   here swap !		( backpatch the build> to point to here )
+\   2 ,			( compile run-code primitive so we look like a word )
+\   ' fromr ,		( compile fromr, which leaves var address on stack )
+\ ;
 
 
 : _dump			( dump out the definition of a word, sort of )
-  bdup s" (" b. s" , "
-  bdup @			( save the pointer and get the contents )
-  bdup b' exit
-  = bif
+  dup s" (" . s" , "
+  dup @			( save the pointer and get the contents )
+  dup ' exit
+  = if
 	s" ;)" cr exit
-  bthen
-  b. s" ), "
+  then
+  . s" ), "
   1 +
   tail _dump
 ;
 
 : dump _dump ;
 
-: # b. cr ;
+: # . cr ;
   
-: var <build , does> ;
-: constant <build , does> @ ;
-: array <build allot does> + ;
+\ : var <build , does> ;
+\ : constant <build , does> @ ;
+\ : array <build allot does> + ;
 
-: [ immediate command ;
+\ : [ immediate command ;
 : _welcome s" Welcome to THIRD.
 Ok.
 " ;
 
-\ : ; immediate b' exit , command exit
+\ : ; immediate ' exit , command exit
 
 \ [
 
-_welcome
+_welcome . .

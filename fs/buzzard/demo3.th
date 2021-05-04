@@ -8,14 +8,11 @@
     .
 	  drop		( and delete the saved value )
         else
-	  .
-	then
+	      .
+ 	      then
 ;
 
 : demo3 10 0 do i printfour loop cr ;
 
-\ drop banner
-drop
-drop
 
 demo3

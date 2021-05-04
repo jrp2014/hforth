@@ -20,8 +20,8 @@
 
 : demo5
 
-  s" The factorial of 3 is: " 3 fact .s cr
-  s" The factorial of 5 is: " 5 fact .s cr
+  s" The factorial of 3 is:" drop 3 fact         \ drop string length
+  s" The factorial of 5 is:" drop 5 fact cr .s
 ;
 
 demo5
