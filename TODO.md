@@ -1,3 +1,3 @@
 TODO
 
-[ ] provide addressable memory emulation through vectors (or arrays)
+[X] provide addressable memory emulation through vectors (or arrays)
